@@ -42,6 +42,7 @@ h3.var{color:var(--red);font-size:22px;font-weight:800;margin:22px 0 8px;letter-
 .empty{color:var(--mu);font-style:italic}
 .srow{display:flex;gap:8px;align-items:stretch}
 .mic{flex:0 0 56px;border:0;border-radius:10px;background:var(--red);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.spk{background:var(--btn)}
 .mic.on{animation:pulse 1s infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(200,16,46,.6)}100%{box-shadow:0 0 0 14px rgba(200,16,46,0)}}
 input[type=search]{flex:1;min-width:0;width:100%;font-family:inherit;font-size:16px;padding:12px 14px;border:2px solid var(--bd);border-radius:10px;background:var(--card);color:var(--tx)}
@@ -75,6 +76,7 @@ input[type=search]{flex:1;min-width:0;width:100%;font-family:inherit;font-size:1
       <button id="mic" class="mic" type="button" aria-label="Buscar por voz" title="Buscar por voz">
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>
       </button>
+      <button id="spk" class="mic spk" type="button" aria-label="Escuchar respuesta" title="Escuchar de nuevo la respuesta" style="display:none"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg></button>
     </div>
     <div id="vstat" class="note" style="margin-top:6px">Pulsa el micrófono y di, por ejemplo: «sandalias flats en talla 8», «tenis con tallas 6, 7 y 8», «Luna talla 7» o «chinas agotadas en talla 9».</div>
     <div id="res"></div>
@@ -273,16 +275,42 @@ function runQuery(q){
   show('No entendí la consulta','<p class="note">Prueba: «sandalias flats en talla 8», «tenis con tallas 6, 7 y 8», «Luna talla 7», «chinas agotadas en talla 9», «grupos de flats».</p>');
   return 'No entendí la consulta. Prueba, por ejemplo: sandalias flats en talla ocho.';
 }
+/* --- Voz de respuesta (robusta para Chrome, Edge, Safari/iPhone) --- */
+const TTS={voice:null,queue:[],keep:null,last:''};
+function pickVoice(){const vs=speechSynthesis.getVoices();
+  TTS.voice=vs.find(v=>/^es[-_](US|MX|CO|419)/i.test(v.lang)&&/google|natural|online/i.test(v.name))
+    ||vs.find(v=>/^es[-_](US|MX|CO|419)/i.test(v.lang))||vs.find(v=>/^es/i.test(v.lang))||null;}
+if('speechSynthesis' in window){pickVoice();speechSynthesis.onvoiceschanged=pickVoice;}
+function unlockTTS(){ // se llama dentro del clic: desbloquea el audio en iPhone/Chrome
+  if(!('speechSynthesis' in window))return;
+  try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u);speechSynthesis.resume();}catch(_){}
+}
+function chunks(text){ // Chrome corta frases largas: se divide en trozos cortos
+  const parts=text.replace(/\s+/g,' ').match(/[^.:;]+[.:;]?/g)||[text];const out=[];let cur='';
+  for(let p of parts){p=p.trim();if(!p)continue;
+    if((cur+' '+p).length>160){if(cur)out.push(cur);
+      while(p.length>160){let k=p.lastIndexOf(',',160);if(k<40)k=160;out.push(p.slice(0,k+1));p=p.slice(k+1).trim();}
+      cur=p;}else cur=(cur?cur+' ':'')+p;}
+  if(cur)out.push(cur);return out;
+}
 function speak(text){
-  if(!('speechSynthesis' in window)) return;
-  speechSynthesis.cancel();
-  const u=new SpeechSynthesisUtterance(text);u.lang='es-US';u.rate=1.05;
-  const v=speechSynthesis.getVoices().find(v=>/^es/i.test(v.lang));if(v)u.voice=v;
-  speechSynthesis.speak(u);
+  if(!('speechSynthesis' in window)){$('#spk').style.display='none';return;}
+  TTS.last=text;clearInterval(TTS.keep);speechSynthesis.cancel();
+  if(!TTS.voice)pickVoice();
+  TTS.queue=chunks(text).map(c=>{const u=new SpeechSynthesisUtterance(c);u.lang=TTS.voice?TTS.voice.lang:'es-US';if(TTS.voice)u.voice=TTS.voice;u.rate=1;u.volume=1;return u;});
+  const last=TTS.queue[TTS.queue.length-1];
+  if(last){last.onend=()=>{clearInterval(TTS.keep);$('#spk').classList.remove('on');};}
+  setTimeout(()=>{ // pequeña pausa: Chrome ignora speak() justo después de cancel()
+    $('#spk').classList.add('on');
+    TTS.queue.forEach(u=>speechSynthesis.speak(u));
+    speechSynthesis.resume();
+    TTS.keep=setInterval(()=>{if(!speechSynthesis.speaking){clearInterval(TTS.keep);$('#spk').classList.remove('on');return;}speechSynthesis.pause();speechSynthesis.resume();},10000);
+  },300);
 }
 function handleVoice(txt){
   const q=parseVoice(txt); const a=runQuery(q);
   $('#vstat').innerHTML='<b>«'+esc(txt)+'»</b> → '+esc(a);
+  $('#spk').style.display='flex';
   speak(a); $('#res').scrollIntoView({behavior:'smooth',block:'start'});
   return a;
 }
@@ -294,7 +322,7 @@ function handleVoice(txt){
   rec.onresult=e=>{let txt='';for(const r of e.results){txt+=r[0].transcript;if(r.isFinal)final=txt;}st.textContent='«'+txt+'»';};
   rec.onerror=e=>{st.textContent=e.error==='not-allowed'?'Permite el uso del micrófono en el navegador para buscar por voz.':(e.error==='no-speech'?'No te escuché. Pulsa el micrófono e inténtalo de nuevo.':'Error de voz: '+e.error);};
   rec.onend=()=>{on=false;btn.classList.remove('on');if(final)handleVoice(final);};
-  btn.addEventListener('click',()=>{if(on){rec.stop();return;}if(window.speechSynthesis)speechSynthesis.cancel();try{rec.start();}catch(_){}});
+  btn.addEventListener('click',()=>{if(on){rec.stop();return;}unlockTTS();try{rec.start();}catch(_){}});
 })();
 
 function kpis(){const S=D.summary;
@@ -317,6 +345,7 @@ function go(id){document.querySelectorAll('.view').forEach(v=>v.classList.toggle
 document.addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b)go(b.dataset.go);});
 window.addEventListener('popstate',()=>go(location.hash.slice(1)||'home'));
 if(location.hash)go(location.hash.slice(1));
+document.getElementById('spk').addEventListener('click',()=>{if(speechSynthesis.speaking){speechSynthesis.cancel();$('#spk').classList.remove('on');return;}unlockTTS();if(TTS.last)speak(TTS.last);});
 </script>
 </body>
 </html>
