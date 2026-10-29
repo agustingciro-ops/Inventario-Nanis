@@ -51,6 +51,8 @@ input[type=search]{flex:1;min-width:0;width:100%;font-family:inherit;font-size:1
 .note{color:var(--mu);font-size:12px}
 .bars text{fill:var(--tx);font-size:12px}
 .bars .lbl{fill:var(--mu)}
+.vhead{font-weight:800;font-size:17px;margin:12px 0 4px}
+.vlist{columns:2 200px;margin:0;padding-left:18px}.vlist li{margin:2px 0}
 .view{display:none}.view.on{display:block}
 </style>
 </head>
@@ -74,7 +76,7 @@ input[type=search]{flex:1;min-width:0;width:100%;font-family:inherit;font-size:1
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>
       </button>
     </div>
-    <div id="vstat" class="note" style="margin-top:6px">Pulsa el micrófono y di, por ejemplo: «Luna talla siete» o «Mireyas».</div>
+    <div id="vstat" class="note" style="margin-top:6px">Pulsa el micrófono y di, por ejemplo: «sandalias flats en talla 8», «tenis con tallas 6, 7 y 8», «Luna talla 7» o «chinas agotadas en talla 9».</div>
     <div id="res"></div>
   </div>
   <div class="kpis" id="kpis"></div>
@@ -156,51 +158,143 @@ $('#q').addEventListener('input',search);
 
 /* ---------- Búsqueda por voz ---------- */
 const NUM={cinco:'5',seis:'6',siete:'7',ocho:'8',nueve:'9',diez:'10'};
-const FILL=/\b(busca|buscar|buscame|quiero|saber|dime|decime|me|cuantas?|cuantos?|hay|tienes|tenemos|queda|quedan|inventario|stock|de|del|la|el|los|las|en|un|una|por|favor|pares?|unidades?|sandalias?|zapatos?|calzado|producto|que|y|disponibles?)\b/g;
-function parseVoice(txt){
-  let t=nz(txt).replace(/[¿?¡!.,]/g,' ');
-  t=t.replace(/\b(seis|6)\s*(centimetros|cm)\b/g,'6cm').replace(/\b(tres|3)\s*(centimetros|cm)\b/g,'3cm');
+const VARW=[
+  [/\b(flats?|planas?|bajitas?)\b/,'Flats'],
+  [/\b(6 ?cm|seis ?cm|6 centimetros|seis centimetros)\b/,'6CM'],
+  [/\b(3 ?cm|tres ?cm|3 centimetros|tres centimetros)\b/,'3CM'],
+  [/\b(plataformas?|altas?)\b/,'Plataformas'],
+  [/\b(mireyas?)\b/,'Mireyas'],
+  [/\b(tenis|sneakers?|zapatillas?|deportivos?)\b/,'Tenis'],
+  [/\b(chinas?|chinitas?)\b/,'Chinas']];
+const FILL=/\b(muestrame|mostrar|muestra|ensename|ver|quiero|saber|dime|decime|busca|buscar|buscame|me|cuales|cuantas?|cuantos?|que|hay|tienes|tenemos|queda|quedan|inventario|stock|de|del|la|el|los|las|en|un|una|unas|unos|por|favor|pares?|unidades?|sandalias?|zapatos?|calzado|productos?|referencias?|modelos?|y|o|con|disponibles?|disponibilidad|talla|tallas|variante|todas?|todos?|para|esta|estan|son|tiene|tengo|lista|listado|cm|centimetros|numero|numeros)\b/g;
+function normVoice(txt){
+  let t=nz(txt).replace(/[¿?¡!.,;:]/g,' ');
+  t=t.replace(/\b(cinco|seis|siete|ocho|nueve|diez)\b/g,m=>NUM[m]);
   t=t.replace(/\b(w|doble ve|doble v|doble u|uve doble)\s*(\d+)/g,'w$2').replace(/\bele hache\s*(\d+)/g,'lh$1');
-  let size=null;
-  const m=t.match(/\btalla\s+(cinco|seis|siete|ocho|nueve|diez|5|6|7|8|9|10)\b/);
-  if(m){size=NUM[m[1]]||m[1];t=t.replace(m[0],' ');}
-  t=t.replace(FILL,' ').replace(/\s+/g,' ').trim();
-  return {term:t,size};
+  t=t.replace(/\b(6|3)\s*(centimetros|cm)\b/g,'$1cm');
+  return t.replace(/\s+/g,' ').trim();
 }
-function answer(hits,size){
-  if(!hits.length) return 'No encontré ese producto.';
-  const top=hits.slice(0,3);
-  let out=top.map(([n,i])=>{
-    const name=n.replace(/–/g,' ');
-    if(size){const q=i.sizes[size];
-      if(q===undefined) return `${name} no maneja talla ${size}.`;
-      return q>0?`${name} tiene ${q} ${q===1?'par':'pares'} en talla ${size}.`:`${name} está agotada en talla ${size}.`;}
-    const con=Object.entries(i.sizes).filter(([s,q])=>q>0).map(([s,q])=>`${q} en talla ${s}`);
-    const ago=Object.entries(i.sizes).filter(([s,q])=>q===0).map(([s])=>s);
-    if(!con.length) return `${name} está agotada en todas las tallas.`;
-    return `${name}: ${con.join('; ')}.`+(ago.length?` Agotada en ${ago.length>1?'tallas':'talla'} ${ago.join(', ')}.`:'');
-  }).join(' ');
-  if(hits.length>3) out+=` Hay ${hits.length-3} resultados más en pantalla.`;
-  return out;
+function parseVoice(txt){
+  let t=normVoice(txt);
+  const q={raw:txt,variant:null,sizes:[],intent:null,term:''};
+  // variante (Mireyas solo si no se habla de un producto concreto)
+  q.termFull=t.replace(/\b(10|[5-9])\b/g,' ').replace(FILL,' ').replace(/\s+/g,' ').trim();
+  for(const [re,v] of VARW){ if(re.test(t)){ q.variant=v; t=t.replace(re,' '); break; } }
+  // intención
+  if(/\b(completas?|todas las tallas|en todas)\b/.test(t)) q.intent='q1';
+  else if(/\b(grupos?|combinacion|combinaciones|coinciden|combinar|juntar)\b/.test(t)) q.intent='q2';
+  else if(/\b(agotad[oa]s?|no hay|sin stock|faltan?|cero)\b/.test(t)) q.intent='out';
+  else if(/\b(pocas?|poquitas?|ultimas?|bajo|bajas?|1 o 2|una o dos|por acabarse|se acaban)\b/.test(t)) q.intent='low';
+  // tallas: números 5–10 que aparecen después de "talla(s)" o sueltos
+  const m=t.match(/\btallas?\s+((?:(?:5|6|7|8|9|10)\b\s*(?:y|,|o)?\s*)+)/);
+  const src=m?m[1]:t.replace(/\bw\d+|\blh\d+|\b\dcm\b/g,' ');
+  q.sizes=[...new Set((src.match(/\b(10|[5-9])\b/g)||[]))];
+  if(!q.intent&&q.sizes.length===3&&q.sizes.sort().join()==='6,7,8') q.intent='q4';
+  // término de producto
+  q.term=t.replace(/\b(completas?|grupos?|combinacion(es)?|coinciden|agotad[oa]s?|pocas?|poquitas?|ultimas?|sin|no|acaban?|acabarse|se|bajo|bajas?)\b/g,' ')
+          .replace(/\b(10|[5-9])\b/g,' ').replace(FILL,' ').replace(/\s+/g,' ').trim();
+  if(q.term.length<2) q.term='';
+  return q;
+}
+const pl=(n,a,b)=>n===1?a:b;
+function itemsOf(v){return Object.entries(D.items).filter(([n,i])=>i.total>0&&(!v||i.var===v));}
+function sayList(names,max=8){
+  if(names.length<=max) return names.join(', ')+'.';
+  return names.slice(0,max).join(', ')+`, y ${names.length-max} más en pantalla.`;
+}
+function voiceRow(n,hl){const it=D.items[n];
+  return `<div class="row"><div class="pname">${esc(n)}<div class="note">${it.var} · ${it.total} pares</div></div><div class="chips">${Object.entries(it.sizes).map(([s,q])=>chip(s,q,hl?hl.includes(s)&&q>0:q>0)).join('')}</div></div>`;}
+function show(title,html){ $('#res').innerHTML=`<div class="vhead">${esc(title)}</div>`+(html||'<p class="empty">Sin resultados.</p>'); }
+
+function runQuery(q){
+  const V=q.variant, VN=V||'todas las variantes';
+  // 1) producto concreto
+  if(q.term){
+    let hits=(q.termFull&&q.termFull!==q.term)?findHits(q.termFull):[];
+    if(hits.length) q.term=q.termFull; else hits=findHits(q.term).filter(([n,i])=>!V||i.var===V);
+    if(hits.length){
+      $('#q').value=q.term;
+      const S=q.sizes;
+      show(`Producto: «${q.term}»${V?' · '+V:''}${S.length?' · talla '+S.join(', '):''}`, hits.map(([n])=>voiceRow(n,S.length?S:null)).join(''));
+      const top=hits.slice(0,3).map(([n,i])=>{const name=n.replace(/–/g,' ');
+        if(S.length) return S.map(s=>{const x=i.sizes[s];return x===undefined?`${name} no maneja talla ${s}.`:x>0?`${name} tiene ${x} ${pl(x,'par','pares')} en talla ${s}.`:`${name} está agotada en talla ${s}.`}).join(' ');
+        const con=Object.entries(i.sizes).filter(([s,x])=>x>0).map(([s,x])=>`${x} en talla ${s}`);
+        const ago=Object.entries(i.sizes).filter(([s,x])=>x===0).map(([s])=>s);
+        if(!con.length) return `${name} está agotada.`;
+        return `${name}: ${con.join(', ')}.`+(ago.length?` Agotada en ${pl(ago.length,'talla','tallas')} ${ago.join(', ')}.`:'');}).join(' ');
+      return top+(hits.length>3?` Hay ${hits.length-3} resultados más en pantalla.`:'');
+    }
+    if(!V&&!q.sizes.length&&!q.intent){ show(`Sin resultados para «${q.term}»`,''); return `No encontré «${q.term}».`; }
+  }
+  $('#q').value='';
+  // 2) consultas del dashboard
+  if(q.intent==='q1'){
+    const vs=V?[V]:D.vars; let h='',say=[];
+    vs.forEach(v=>{const L=D.q1[v];h+=`<h3 class="var">${v}</h3>`+(L.length?L.map(n=>voiceRow(n)).join(''):'<p class="empty">Ninguno.</p>');say.push(`${v}: ${L.length?sayList(L,6):'ninguno.'}`);});
+    show(`Tallas completas · ${VN}`,h); return 'Con todas las tallas. '+say.join(' ');
+  }
+  if(q.intent==='q2'){
+    const vs=V?[V]:D.vars; let h='',say=[];
+    vs.forEach(v=>{const G=D.q2[v];h+=`<h3 class="var">${v}</h3>`+(G.length?G.map((g,k)=>`<div class="grp"><div class="gh">Grupo ${k+1} · coinciden en tallas ${g.match.join(', ')} · ${g.total} pares</div>${g.items.map(n=>voiceRow(n,g.match)).join('')}</div>`).join(''):'<p class="empty">No hay grupos.</p>');
+      if(G.length) say.push(`${v}, grupo 1: ${G[0].items.join(', ')}, coinciden en tallas ${G[0].match.join(', ')}.`);});
+    show(`Grupos por tallas · ${VN}`,h); return say.join(' ')+' Los demás grupos están en pantalla.';
+  }
+  const S=q.sizes.length?q.sizes:null;
+  if(q.intent==='q4'||(S&&S.length>1&&!q.intent)){
+    const ss=S||['6','7','8'];
+    const L=itemsOf(V).filter(([n,i])=>ss.every(s=>i.sizes[s]>0)).map(([n])=>n).sort();
+    show(`${VN} con tallas ${ss.join(', ')} · ${L.length}`,L.map(n=>voiceRow(n,ss)).join(''));
+    return L.length?`En ${VN} hay ${L.length} ${pl(L.length,'producto','productos')} con tallas ${ss.join(', ')}: ${sayList(L)}`:`No hay productos de ${VN} con tallas ${ss.join(', ')}.`;
+  }
+  if(q.intent==='out'){
+    const L=itemsOf(V).filter(([n,i])=>S?S.some(s=>i.sizes[s]===0):Object.values(i.sizes).some(x=>x===0)).map(([n])=>n).sort();
+    show(`${VN} agotados${S?' en talla '+S.join(', '):''} · ${L.length}`,L.map(n=>voiceRow(n,S)).join(''));
+    return L.length?`En ${VN}, ${L.length} ${pl(L.length,'producto','productos')} ${S?pl(L.length,'está agotado','están agotados')+' en talla '+S.join(', '):pl(L.length,'tiene','tienen')+' tallas agotadas'}: ${sayList(L)}`:'No hay agotados.';
+  }
+  if(q.intent==='low'){
+    const L=itemsOf(V).filter(([n,i])=>(S||Object.keys(i.sizes)).some(s=>i.sizes[s]>=1&&i.sizes[s]<=2)).map(([n])=>n).sort();
+    show(`${VN} con 1 o 2 unidades${S?' en talla '+S.join(', '):''} · ${L.length}`,L.map(n=>voiceRow(n,S)).join(''));
+    return L.length?`Con 1 o 2 unidades${S?' en talla '+S.join(', '):''} en ${VN} hay ${L.length}: ${sayList(L)}`:'No hay productos con 1 o 2 unidades.';
+  }
+  if(S&&S.length===1){
+    const s=S[0]; const vs=V?[V]:D.vars; let h='',say=[],tot=0;
+    vs.forEach(v=>{const L=itemsOf(v).filter(([n,i])=>i.sizes[s]>0).sort((a,b)=>a[0].localeCompare(b[0]));
+      const pares=L.reduce((a,[n,i])=>a+i.sizes[s],0);tot+=pares;
+      h+=(V?'':`<h3 class="var">${v} · talla ${s}</h3>`)+(L.length?`<ul class="vlist">${L.map(([n,i])=>`<li>${nameQ(n,s)}</li>`).join('')}</ul>`:'<p class="empty">Sin stock en esta talla.</p>');
+      say.push(V?`En ${v} talla ${s} hay ${L.length} ${pl(L.length,'modelo','modelos')}, ${pares} pares: ${L.length?sayList(L.map(([n,i])=>i.sizes[s]<=2?`${n.replace(/–/g,' ')}, solo ${i.sizes[s]}`:n.replace(/–/g,' '))):''}`:`${v}: ${L.length} ${pl(L.length,'modelo','modelos')}.`);});
+    show(V?`${V} · talla ${s} (${D.summary?'':''}${say.length?'':''})`.replace(' ()',''):`Talla ${s} · todas las variantes`,h);
+    return V?say[0]:`En talla ${s} hay ${tot} pares. `+say.join(' ');
+  }
+  if(V){
+    const L=itemsOf(V).sort((a,b)=>a[0].localeCompare(b[0]));
+    show(`${V} · ${L.length} productos con stock`,L.map(([n])=>voiceRow(n)).join(''));
+    return `En ${V} hay ${D.summary.byVar[V]} pares en ${L.length} productos. Están en pantalla. Puedes decir, por ejemplo, ${V} talla 8.`;
+  }
+  show('No entendí la consulta','<p class="note">Prueba: «sandalias flats en talla 8», «tenis con tallas 6, 7 y 8», «Luna talla 7», «chinas agotadas en talla 9», «grupos de flats».</p>');
+  return 'No entendí la consulta. Prueba, por ejemplo: sandalias flats en talla ocho.';
 }
 function speak(text){
   if(!('speechSynthesis' in window)) return;
   speechSynthesis.cancel();
-  const u=new SpeechSynthesisUtterance(text);u.lang='es-US';u.rate=1;
+  const u=new SpeechSynthesisUtterance(text);u.lang='es-US';u.rate=1.05;
   const v=speechSynthesis.getVoices().find(v=>/^es/i.test(v.lang));if(v)u.voice=v;
   speechSynthesis.speak(u);
+}
+function handleVoice(txt){
+  const q=parseVoice(txt); const a=runQuery(q);
+  $('#vstat').innerHTML='<b>«'+esc(txt)+'»</b> → '+esc(a);
+  speak(a); $('#res').scrollIntoView({behavior:'smooth',block:'start'});
+  return a;
 }
 (function(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;const btn=$('#mic'),st=$('#vstat');
   if(!SR){btn.style.display='none';st.textContent='La búsqueda por voz funciona en Chrome, Edge o Safari.';return;}
   const rec=new SR();rec.lang='es-US';rec.interimResults=true;rec.maxAlternatives=1;let on=false,final='';
-  rec.onstart=()=>{on=true;final='';btn.classList.add('on');st.textContent='Escuchando… di el nombre del producto (y la talla si quieres).';};
+  rec.onstart=()=>{on=true;final='';btn.classList.add('on');st.textContent='Escuchando… por ejemplo: «sandalias flats en talla 8».';};
   rec.onresult=e=>{let txt='';for(const r of e.results){txt+=r[0].transcript;if(r.isFinal)final=txt;}st.textContent='«'+txt+'»';};
   rec.onerror=e=>{st.textContent=e.error==='not-allowed'?'Permite el uso del micrófono en el navegador para buscar por voz.':(e.error==='no-speech'?'No te escuché. Pulsa el micrófono e inténtalo de nuevo.':'Error de voz: '+e.error);};
-  rec.onend=()=>{on=false;btn.classList.remove('on');if(!final)return;
-    const {term,size}=parseVoice(final);$('#q').value=term;const hits=search();
-    const a=answer(hits,size);st.textContent='«'+final+'» → '+a;speak(a);};
-  btn.addEventListener('click',()=>{if(on){rec.stop();return;}speechSynthesis&&speechSynthesis.cancel();try{rec.start();}catch(_){}});
+  rec.onend=()=>{on=false;btn.classList.remove('on');if(final)handleVoice(final);};
+  btn.addEventListener('click',()=>{if(on){rec.stop();return;}if(window.speechSynthesis)speechSynthesis.cancel();try{rec.start();}catch(_){}});
 })();
 
 function kpis(){const S=D.summary;
