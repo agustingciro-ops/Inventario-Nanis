@@ -40,7 +40,11 @@ h3.var{color:var(--red);font-size:22px;font-weight:800;margin:22px 0 8px;letter-
 .o{color:var(--org);font-weight:700}
 .back{font-family:inherit;font-size:15px;font-weight:600;background:none;border:1px solid var(--bd);color:var(--tx);border-radius:8px;padding:8px 12px;cursor:pointer;margin-bottom:10px}
 .empty{color:var(--mu);font-style:italic}
-input[type=search]{width:100%;font-family:inherit;font-size:16px;padding:12px 14px;border:2px solid var(--bd);border-radius:10px;background:var(--card);color:var(--tx)}
+.srow{display:flex;gap:8px;align-items:stretch}
+.mic{flex:0 0 56px;border:0;border-radius:10px;background:var(--red);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.mic.on{animation:pulse 1s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(200,16,46,.6)}100%{box-shadow:0 0 0 14px rgba(200,16,46,0)}}
+input[type=search]{flex:1;min-width:0;width:100%;font-family:inherit;font-size:16px;padding:12px 14px;border:2px solid var(--bd);border-radius:10px;background:var(--card);color:var(--tx)}
 #res .row{border-bottom:1px solid var(--bd)}
 .legend{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:13px;margin-top:8px}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
@@ -64,7 +68,13 @@ input[type=search]{width:100%;font-family:inherit;font-size:16px;padding:12px 14
   </div>
   <div class="card">
     <h2>Buscar producto</h2>
-    <input type="search" id="q" placeholder="Escribe un nombre: Luna, Mireyas, W40…" autocomplete="off">
+    <div class="srow">
+      <input type="search" id="q" placeholder="Escribe o pulsa el micrófono: Luna, Mireyas, W40…" autocomplete="off">
+      <button id="mic" class="mic" type="button" aria-label="Buscar por voz" title="Buscar por voz">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="17" x2="12" y2="22"/></svg>
+      </button>
+    </div>
+    <div id="vstat" class="note" style="margin-top:6px">Pulsa el micrófono y di, por ejemplo: «Luna talla siete» o «Mireyas».</div>
     <div id="res"></div>
   </div>
   <div class="kpis" id="kpis"></div>
@@ -125,13 +135,73 @@ function render(){
   $('#q4 .body').innerHTML=h;
 }
 
+const nz=s=>String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+function findHits(t){
+  t=nz(t).trim(); if(!t) return [];
+  const all=Object.entries(D.items);
+  let h=all.filter(([n,i])=>nz(n).includes(t)||nz(i.full).includes(t));
+  if(!h.length){const w=t.split(/\s+/).filter(x=>x.length>1);
+    h=all.filter(([n,i])=>w.every(x=>nz(n).includes(x)||nz(i.full).includes(x)));
+    if(!h.length) h=all.filter(([n])=>w.some(x=>x.length>2&&nz(n).split(/[\s–/-]+/).includes(x)));}
+  return h.slice(0,40);
+}
 function search(){
-  const t=$('#q').value.trim().toLowerCase();
-  if(!t){$('#res').innerHTML='';return;}
-  const hits=Object.entries(D.items).filter(([n,i])=>n.toLowerCase().includes(t)||i.full.toLowerCase().includes(t)).slice(0,40);
+  const t=$('#q').value.trim();
+  if(!t){$('#res').innerHTML='';return [];}
+  const hits=findHits(t);
   $('#res').innerHTML=hits.length?hits.map(([n,i])=>`<div class="row"><div class="pname">${esc(n)}<div class="note">${i.var} · ${i.total} pares</div></div><div class="chips">${Object.entries(i.sizes).map(([s,q])=>`<span class="chip ${q>0?'':'off'}">${s}<span class="q" style="color:${q>2?'var(--tx)':'var(--org)'}">${q}</span></span>`).join('')}</div></div>`).join(''):'<p class="empty">Sin resultados.</p>';
+  return hits;
 }
 $('#q').addEventListener('input',search);
+
+/* ---------- Búsqueda por voz ---------- */
+const NUM={cinco:'5',seis:'6',siete:'7',ocho:'8',nueve:'9',diez:'10'};
+const FILL=/\b(busca|buscar|buscame|quiero|saber|dime|decime|me|cuantas?|cuantos?|hay|tienes|tenemos|queda|quedan|inventario|stock|de|del|la|el|los|las|en|un|una|por|favor|pares?|unidades?|sandalias?|zapatos?|calzado|producto|que|y|disponibles?)\b/g;
+function parseVoice(txt){
+  let t=nz(txt).replace(/[¿?¡!.,]/g,' ');
+  t=t.replace(/\b(seis|6)\s*(centimetros|cm)\b/g,'6cm').replace(/\b(tres|3)\s*(centimetros|cm)\b/g,'3cm');
+  t=t.replace(/\b(w|doble ve|doble v|doble u|uve doble)\s*(\d+)/g,'w$2').replace(/\bele hache\s*(\d+)/g,'lh$1');
+  let size=null;
+  const m=t.match(/\btalla\s+(cinco|seis|siete|ocho|nueve|diez|5|6|7|8|9|10)\b/);
+  if(m){size=NUM[m[1]]||m[1];t=t.replace(m[0],' ');}
+  t=t.replace(FILL,' ').replace(/\s+/g,' ').trim();
+  return {term:t,size};
+}
+function answer(hits,size){
+  if(!hits.length) return 'No encontré ese producto.';
+  const top=hits.slice(0,3);
+  let out=top.map(([n,i])=>{
+    const name=n.replace(/–/g,' ');
+    if(size){const q=i.sizes[size];
+      if(q===undefined) return `${name} no maneja talla ${size}.`;
+      return q>0?`${name} tiene ${q} ${q===1?'par':'pares'} en talla ${size}.`:`${name} está agotada en talla ${size}.`;}
+    const con=Object.entries(i.sizes).filter(([s,q])=>q>0).map(([s,q])=>`${q} en talla ${s}`);
+    const ago=Object.entries(i.sizes).filter(([s,q])=>q===0).map(([s])=>s);
+    if(!con.length) return `${name} está agotada en todas las tallas.`;
+    return `${name}: ${con.join('; ')}.`+(ago.length?` Agotada en ${ago.length>1?'tallas':'talla'} ${ago.join(', ')}.`:'');
+  }).join(' ');
+  if(hits.length>3) out+=` Hay ${hits.length-3} resultados más en pantalla.`;
+  return out;
+}
+function speak(text){
+  if(!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text);u.lang='es-US';u.rate=1;
+  const v=speechSynthesis.getVoices().find(v=>/^es/i.test(v.lang));if(v)u.voice=v;
+  speechSynthesis.speak(u);
+}
+(function(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;const btn=$('#mic'),st=$('#vstat');
+  if(!SR){btn.style.display='none';st.textContent='La búsqueda por voz funciona en Chrome, Edge o Safari.';return;}
+  const rec=new SR();rec.lang='es-US';rec.interimResults=true;rec.maxAlternatives=1;let on=false,final='';
+  rec.onstart=()=>{on=true;final='';btn.classList.add('on');st.textContent='Escuchando… di el nombre del producto (y la talla si quieres).';};
+  rec.onresult=e=>{let txt='';for(const r of e.results){txt+=r[0].transcript;if(r.isFinal)final=txt;}st.textContent='«'+txt+'»';};
+  rec.onerror=e=>{st.textContent=e.error==='not-allowed'?'Permite el uso del micrófono en el navegador para buscar por voz.':(e.error==='no-speech'?'No te escuché. Pulsa el micrófono e inténtalo de nuevo.':'Error de voz: '+e.error);};
+  rec.onend=()=>{on=false;btn.classList.remove('on');if(!final)return;
+    const {term,size}=parseVoice(final);$('#q').value=term;const hits=search();
+    const a=answer(hits,size);st.textContent='«'+final+'» → '+a;speak(a);};
+  btn.addEventListener('click',()=>{if(on){rec.stop();return;}speechSynthesis&&speechSynthesis.cancel();try{rec.start();}catch(_){}});
+})();
 
 function kpis(){const S=D.summary;
   $('#kpis').innerHTML=[[S.pares.toLocaleString('es'),'Pares disponibles'],[S.refs,'Referencias con stock'],[S.low,'Tallas con 1–2 unidades'],[S.zeroSizes,'Tallas agotadas']].map(([b,s])=>`<div class="card kpi"><b>${b}</b><span>${s}</span></div>`).join('');}
