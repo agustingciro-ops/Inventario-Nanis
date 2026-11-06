@@ -66,6 +66,9 @@ input[type=search]{flex:1;min-width:0;width:100%;font-family:inherit;font-size:1
 @keyframes phbar{from{transform:scaleX(1)}to{transform:scaleX(0)}}
 @media (prefers-reduced-motion:reduce){#phpop.on .bar{animation:none}}
 .view{display:none}.view.on{display:block}
+.sortbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin:10px 0 6px}
+.sortbtn{font-family:inherit;font-size:17px;font-weight:700;padding:14px 12px;border:2px solid var(--btn);border-radius:12px;background:var(--card);color:var(--tx);cursor:pointer}
+.sortbtn.on{background:var(--btn);color:var(--btnTx)}
 </style>
 </head>
 <body>
@@ -79,6 +82,7 @@ input[type=search]{flex:1;min-width:0;width:100%;font-family:inherit;font-size:1
     <button data-go="q2">Grupos por tallas</button>
     <button data-go="q3">Productos por talla</button>
     <button data-go="q4">Tallas 6, 7 y 8</button>
+    <button data-go="all" style="grid-column:1/-1">Todos los productos</button>
   </div>
   <div class="card">
     <h2>Buscar producto</h2>
@@ -105,6 +109,8 @@ input[type=search]{flex:1;min-width:0;width:100%;font-family:inherit;font-size:1
 <section id="q2" class="view"><button class="back" data-go="home">← Volver</button><h2>Grupos por tallas</h2><p class="note">Grupos de 3 productos con la misma combinación de tallas disponibles (sin los de tallas completas), hasta 4 por variante, de menor a mayor inventario. Recuadro con borde = talla en la que coinciden.</p><div class="body"></div></section>
 <section id="q3" class="view"><button class="back" data-go="home">← Volver</button><h2>Productos por talla</h2><div class="body"></div></section>
 <section id="q4" class="view"><button class="back" data-go="home">← Volver</button><h2>Tallas 6, 7 y 8</h2><p class="note">Productos con inventario en las tres tallas 6, 7 y 8.</p><div class="body"></div></section>
+<section id="all" class="view"><button class="back" data-go="home">← Volver</button><h2>Todos los productos</h2><div class="sortbar" role="group" aria-label="Ordenar productos"><button type="button" class="sortbtn" data-sort="tallas">Ordenar por cantidad de tallas disponibles</button><button type="button" class="sortbtn on" data-sort="alfa">Ordenar por orden alfabético</button></div>
+<p class="note">Todos los productos con inventario, por variante. Cada cuadro muestra la talla y debajo la cantidad disponible (naranja = 1 o 2 unidades; punteado = agotada). Usa los botones para cambiar el orden dentro de cada variante.</p><div class="body"></div></section>
 </div>
 
 <script>
@@ -353,6 +359,12 @@ function bars(el,obj,color){const k=Object.keys(obj),mx=Math.max(...Object.value
   $(el).innerHTML=`<svg class="bars" viewBox="0 0 ${W} ${H}" width="100%">${s}</svg>`;}
 
 const sizeLbl={};for(const s of D.sizes)sizeLbl['Talla '+s]=D.summary.bySize[s];
+let SORT='alfa';
+const nT=i=>Object.values(i.sizes).filter(q=>q>0).length;
+function renderAll(){let h='';for(const v of D.vars){const L=Object.entries(D.items).filter(([n,i])=>i.var===v).sort(SORT==='tallas'?((a,b)=>nT(b[1])-nT(a[1])||b[1].total-a[1].total||a[0].localeCompare(b[0])):((a,b)=>a[0].localeCompare(b[0],'es')));h+=`<h3 class="var">${v} <span class="note" style="font-size:14px;font-weight:600">· ${L.length} productos · ${D.summary.byVar[v]} pares</span></h3>`;h+=L.length?L.map(([n,i])=>`<div class="row"><div class="pname">${esc(n)}${ph(n)}<div class="note">${nT(i)} tallas · ${i.total} pares</div></div><div class="chips">${Object.entries(i.sizes).map(([s,q])=>`<span class="chip ${q>0?'':'off'}">${s}<span class="q" style="color:${q>2?'var(--tx)':'var(--org)'}">${q}</span></span>`).join('')}</div></div>`).join(''):'<p class="empty">Sin productos.</p>';}
+  $('#all .body').innerHTML=h;}
+document.querySelectorAll('.sortbtn').forEach(b=>b.addEventListener('click',()=>{SORT=b.dataset.sort;document.querySelectorAll('.sortbtn').forEach(x=>x.classList.toggle('on',x===b));renderAll();}));
+renderAll();
 render();kpis();pie();bars('#barSize',sizeLbl,'#2a6fdb');bars('#barRefs',D.summary.refsByVar,'#e8740c');
 
 function go(id){document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id===id));window.scrollTo(0,0);if((location.hash.slice(1)||'home')!==id)history.pushState(null,'','#'+id);}
