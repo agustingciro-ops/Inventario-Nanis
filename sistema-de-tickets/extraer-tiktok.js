@@ -14,6 +14,7 @@
   const alturaDe = t => { const m = String(t).match(/(\d+(?:[.,]\d+)?)\s*cm/i); if (m) return m[1].replace(',', '.') + ' cm'; return /\bflats?\b/i.test(t) ? 'Flat' : ''; };
   const modeloDe = t => {
     let s = String(t).split(/\s\/|\/|\s[-–]|[-–]\s|:|,/)[0].trim().replace(/\s+/g, ' ');
+    s = s.replace(/[-\s]*colombian.*$/i, '').trim() || s;
     if (s.split(' ').length > 3) s = s.split(' ')[0];
     return s.toLowerCase().replace(/(^|\s)\S/g, x => x.toUpperCase());
   };
