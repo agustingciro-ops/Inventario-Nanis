@@ -82,6 +82,22 @@ dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);co
 dialog::backdrop{background:rgba(0,0,0,.45)}
 dialog h2{margin:0 0 12px;font:600 20px/1.2 var(--display)}
 .login{max-width:400px;margin:10vh auto 0}
+dialog.wide{max-width:1040px}
+.pfilters{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:8px;margin-bottom:8px}
+@media (max-width:760px){.pfilters{grid-template-columns:1fr 1fr}.pfilters #pq{grid-column:1/-1}}
+.chk{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted);margin:0}
+.chk input{width:auto}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;max-height:55vh;overflow:auto;padding:2px;margin-top:8px}
+.ph{position:relative;border:2px solid var(--line);border-radius:10px;overflow:hidden;background:var(--soft);padding:0;text-align:left;font-weight:400}
+.ph img{display:block;width:100%;aspect-ratio:1/1;object-fit:cover;background:var(--soft)}
+.ph .cap{padding:6px 8px;font-size:12px;background:var(--card);display:flex;flex-direction:column;gap:2px}
+.ph .cap b{font-size:13px}
+.ph .cap small{color:var(--muted)}
+.ph.on{border-color:var(--accent)}
+.ph .num{position:absolute;top:6px;left:6px;width:26px;height:26px;border-radius:50%;background:var(--card);border:2px solid var(--line);display:grid;place-items:center;font-size:13px;font-weight:700}
+.ph.on .num{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.ph .out{position:absolute;top:6px;right:6px;background:var(--warn);color:var(--card);font-size:11px;font-weight:700;padding:2px 6px;border-radius:99px}
+.selbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;border-top:1px solid var(--line);margin-top:12px;padding-top:12px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:50;max-width:calc(100% - 32px)}
 </style>
 </head>
@@ -90,6 +106,7 @@ dialog h2{margin:0 0 12px;font:600 20px/1.2 var(--display)}
   <h1><a href="../pagina-de-tickets/panel-principal-nanis-boutique.html" title="Volver al panel principal">Tickets Nanis</a></h1>
   <div class="hright" id="hright" hidden>
     <div class="who" id="me" title="Sesión iniciada"></div>
+    <button id="btnProd">Productos</button>
     <button class="primary" id="btnNew">+ Nuevo ticket</button>
     <button id="btnOut">Salir</button>
   </div>
@@ -149,6 +166,30 @@ dialog h2{margin:0 0 12px;font:600 20px/1.2 var(--display)}
       </div>
     </div>
   </form>
+</dialog>
+
+<dialog id="dlgProd" class="wide">
+  <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">Buscar productos</h2><button id="pClose">Cerrar</button></div>
+  <div class="pfilters">
+    <input id="pq" placeholder="Modelo (ej. Mireya, Sol, W68)…">
+    <select id="pTipo"></select>
+    <select id="pAltura"></select>
+    <select id="pColor"></select>
+    <select id="pTalla"></select>
+  </div>
+  <div class="row" style="justify-content:space-between">
+    <label class="chk"><input type="checkbox" id="pAgot"> Mostrar también agotados</label>
+    <small id="pInfo" style="color:var(--muted)"></small>
+  </div>
+  <div class="gallery" id="pGal"></div>
+  <div class="selbar">
+    <span id="pSel" style="color:var(--muted)">Toca las fotos para seleccionarlas</span>
+    <div class="row">
+      <button id="pNone">Quitar selección</button>
+      <button id="pTxt">Copiar texto</button>
+      <button class="primary" id="pCopy">Copiar foto</button>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="dlgConfirm"><div class="stack"><h2 id="cTitle"></h2><p id="cText" style="margin:0"></p>
@@ -317,6 +358,84 @@ $("#form").addEventListener("submit",async e=>{
 });
 ["#q","#fStatus","#fReason","#fOwner"].forEach(s=>$(s).addEventListener("input",()=>{if(s==="#fStatus")filterStatus="";render()}));
 $("#btnClear").onclick=()=>{$("#q").value="";$("#fStatus").value="";$("#fReason").value="";$("#fOwner").value="";filterStatus="";mine=false;render()};
+
+/* ---------- buscador de productos ---------- */
+const FOTO_URL=p=>`${SUPABASE_URL}/storage/v1/object/public/fotos-de-productos/${p.split("/").map(encodeURIComponent).join("/")}`;
+let cat=null,picked=[],copyPos=0;
+const tallaNum=t=>{const n=parseFloat(String(t).replace(",","."));return isNaN(n)?999:n};
+async function loadCatalog(){
+  $("#pInfo").textContent="Cargando catálogo…";
+  const [p,c,s]=await Promise.all([
+    sb.from("productos").select("id,modelo,nombre,tipo,altura").eq("activo",true).limit(5000),
+    sb.from("producto_colores").select("producto_id,color,foto").limit(10000),
+    sb.from("producto_skus").select("producto_id,color,talla,altura,stock").limit(20000)]);
+  if(p.error||c.error||s.error){$("#pInfo").textContent="No se pudo cargar el catálogo.";return}
+  const prod=new Map(p.data.map(x=>[x.id,x]));
+  const items=[];
+  c.data.forEach(col=>{const pr=prod.get(col.producto_id);if(!pr)return;
+    const vs=s.data.filter(v=>v.producto_id===col.producto_id&&v.color===col.color);
+    items.push({key:col.producto_id+"|"+col.color,modelo:pr.modelo,nombre:pr.nombre,tipo:pr.tipo,altura:pr.altura,color:col.color,foto:col.foto,vs});});
+  items.sort((a,b)=>a.modelo.localeCompare(b.modelo,"es")||a.color.localeCompare(b.color,"es"));
+  const uniq=a=>[...new Set(a.filter(Boolean))];
+  const alturas=uniq(items.flatMap(i=>[i.altura,...i.vs.map(v=>v.altura)])).sort((a,b)=>(a==="Flat"?-1:b==="Flat"?1:tallaNum(a)-tallaNum(b)));
+  fillSelect($("#pTipo"),uniq(items.map(i=>i.tipo)).sort(),"Sandalias y tenis");
+  fillSelect($("#pAltura"),alturas,"Todas las alturas");
+  fillSelect($("#pColor"),uniq(items.map(i=>i.color)).sort((a,b)=>a.localeCompare(b,"es")),"Todos los colores");
+  fillSelect($("#pTalla"),uniq(items.flatMap(i=>i.vs.map(v=>v.talla))).sort((a,b)=>tallaNum(a)-tallaNum(b)),"Todas las tallas");
+  cat=items;renderGallery();
+}
+function matches(i){
+  const q=$("#pq").value.trim().toLowerCase(),tipo=$("#pTipo").value,alt=$("#pAltura").value,col=$("#pColor").value,talla=$("#pTalla").value,agot=$("#pAgot").checked;
+  if(q&&!(i.modelo+" "+i.nombre).toLowerCase().includes(q))return null;
+  if(tipo&&i.tipo!==tipo)return null;
+  if(col&&i.color!==col)return null;
+  let vs=i.vs.filter(v=>(!alt||(v.altura||i.altura)===alt)&&(!talla||v.talla===talla));
+  if(alt&&!vs.length&&i.altura!==alt)return null;
+  if(talla&&!vs.length)return null;
+  const disp=vs.filter(v=>v.stock>0);
+  if(!agot&&!disp.length)return null;
+  return {disp,vs};
+}
+function renderGallery(){
+  if(!cat)return;
+  const res=cat.map(i=>({i,m:matches(i)})).filter(x=>x.m);
+  $("#pInfo").textContent=`${res.length} resultado${res.length===1?"":"s"}`;
+  $("#pGal").innerHTML=res.length?res.map(({i,m})=>{const n=picked.indexOf(i.key);
+    const tallas=[...new Set(m.disp.map(v=>v.talla))].sort((a,b)=>tallaNum(a)-tallaNum(b));
+    return `<button class="ph ${n>=0?"on":""}" data-k="${esc(i.key)}"><span class="num">${n>=0?n+1:""}</span>${m.disp.length?"":'<span class="out">Agotado</span>'}
+      ${i.foto?`<img src="${FOTO_URL(i.foto)}" alt="${esc(i.modelo+" "+i.color)}" loading="lazy">`:'<img alt="">'}
+      <div class="cap"><b>${esc(i.modelo)}</b><span>${esc(i.color)}${i.altura?" · "+esc(i.altura):""}</span><small>${tallas.length?"Tallas: "+esc(tallas.join(" · ")):"Sin existencias"}</small></div></button>`}).join("")
+   :`<div class="empty" style="grid-column:1/-1">${cat.length?"No hay productos con esos filtros":"El catálogo está vacío. Hay que sincronizarlo desde TikTok."}</div>`;
+  document.querySelectorAll(".ph").forEach(el=>el.onclick=()=>{const k=el.dataset.k,ix=picked.indexOf(k);ix>=0?picked.splice(ix,1):picked.push(k);copyPos=0;renderGallery()});
+  const n=picked.length;
+  $("#pSel").textContent=n?`${n} seleccionada${n>1?"s":""}`:"Toca las fotos para seleccionarlas";
+  ["#pNone","#pTxt","#pCopy"].forEach(s=>$(s).disabled=!n);
+  $("#pCopy").textContent=n<=1?"Copiar foto":`Copiar foto ${copyPos+1} de ${n}`;
+}
+async function pngBlob(url){
+  const b=await (await fetch(url)).blob();if(b.type==="image/png")return b;
+  const img=await createImageBitmap(b);const c=document.createElement("canvas");c.width=img.width;c.height=img.height;c.getContext("2d").drawImage(img,0,0);
+  return await new Promise((res,rej)=>c.toBlob(x=>x?res(x):rej(new Error("png")),"image/png"));
+}
+$("#btnProd").onclick=()=>{$("#dlgProd").showModal();if(!cat)loadCatalog();else renderGallery()};
+$("#pClose").onclick=()=>$("#dlgProd").close();
+["#pq","#pTipo","#pAltura","#pColor","#pTalla","#pAgot"].forEach(s=>$(s).addEventListener("input",renderGallery));
+$("#pNone").onclick=()=>{picked=[];copyPos=0;renderGallery()};
+$("#pTxt").onclick=async()=>{
+  const lines=picked.map(k=>cat.find(i=>i.key===k)).filter(Boolean).map(i=>{const m=matches(i)||{disp:[]};const t=[...new Set(m.disp.map(v=>v.talla))].sort((a,b)=>tallaNum(a)-tallaNum(b));return `${i.modelo} – ${i.color}${i.altura?" ("+i.altura+")":""}${t.length?" · tallas "+t.join(", "):""}`});
+  try{await navigator.clipboard.writeText(lines.join("\n"));toast("Texto copiado")}catch{toast("No se pudo copiar")}
+};
+$("#pCopy").onclick=async()=>{
+  if(!picked.length)return;if(copyPos>=picked.length)copyPos=0;
+  const i=cat.find(x=>x.key===picked[copyPos]);if(!i||!i.foto){toast("Esa foto no está disponible");return}
+  try{
+    await navigator.clipboard.write([new ClipboardItem({"image/png":pngBlob(FOTO_URL(i.foto))})]);
+    const cur=copyPos+1,tot=picked.length;
+    toast(tot>1?`Foto ${cur} de ${tot} copiada (${i.modelo} ${i.color}). Pégala en WhatsApp con Ctrl+V${cur<tot?" y vuelve por la siguiente":""}.`:`Foto copiada (${i.modelo} ${i.color}). Pégala en WhatsApp con Ctrl+V.`,6000);
+    copyPos=cur<tot?copyPos+1:0;
+  }catch(e){toast("Este navegador no dejó copiar la imagen. Prueba en Chrome o Edge de computador.",6000)}
+  renderGallery();
+};
 
 /* ---------- entrar / salir ---------- */
 $("#loginForm").addEventListener("submit",async e=>{
