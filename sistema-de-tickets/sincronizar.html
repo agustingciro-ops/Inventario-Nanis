@@ -111,6 +111,13 @@ $("#paste").addEventListener("paste",e=>{
   $("#log").textContent="";
   sincronizar(t).catch(err=>{log("Error: "+(err.message||err));window.__syncResult={error:String(err.message||err)}});
 });
+// También recibe el catálogo en la dirección (#cat=...), así no se usa el portapapeles
+if(location.hash.startsWith("#cat=")){
+  const t=decodeURIComponent(location.hash.slice(5));
+  history.replaceState(null,"",location.pathname);
+  $("#paste").value=`(${t.length.toLocaleString("es")} caracteres recibidos desde TikTok)`;
+  sincronizar(t).catch(err=>{log("Error: "+(err.message||err));window.__syncResult={error:String(err.message||err)}});
+}
 </script>
 </body>
 </html>
