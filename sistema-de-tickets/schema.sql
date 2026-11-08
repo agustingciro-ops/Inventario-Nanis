@@ -57,3 +57,26 @@ exception when duplicate_object then null; end $$;
 do $$ begin
   alter publication supabase_realtime add table public.notes;
 exception when duplicate_object then null; end $$;
+
+-- Autoría por sesión: quien crea el ticket o escribe la nota queda registrado con su correo.
+-- La base de datos lo pone sola, así nadie puede firmar a nombre de otra persona.
+create or replace function public.set_author() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare who text := auth.jwt() ->> 'email';
+begin
+  if who is null then return new; end if;
+  if tg_table_name = 'tickets' then
+    new.created_by := who;
+    if coalesce(new.owner, '') = '' then new.owner := who; end if;
+  else
+    new.by_name := who;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists tickets_author on public.tickets;
+create trigger tickets_author before insert on public.tickets for each row execute function public.set_author();
+drop trigger if exists notes_author on public.notes;
+create trigger notes_author before insert on public.notes for each row execute function public.set_author();
+
+alter table public.tickets alter column owner set default '';
