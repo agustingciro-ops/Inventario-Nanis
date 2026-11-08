@@ -67,8 +67,10 @@ async function sincronizar(texto){
   // 2. fotos (solo las nuevas o cambiadas)
   const {data:ya}=await sb.from("producto_colores").select("producto_id,color,foto,foto_origen");
   const prev=new Map((ya||[]).map(r=>[r.producto_id+"|"+r.color,r]));
-  const nuevas=colores.filter(c=>{const r=prev.get(c.producto_id+"|"+c.color);return !r||r.foto_origen!==c.uri||!r.foto});
-  log(`Fotos: ${colores.length} en total, ${nuevas.length} por descargar.`);
+  // ?solo=inventario: no vuelve a bajar fotos que ya existen; solo baja la de un producto o color nuevo que aún no tiene foto
+  const soloInv=new URLSearchParams(location.search).get("solo")==="inventario";
+  const nuevas=colores.filter(c=>{const r=prev.get(c.producto_id+"|"+c.color);return !r||!r.foto||(!soloInv&&r.foto_origen!==c.uri)});
+  log(`Fotos: ${colores.length} en total, ${nuevas.length} por descargar${soloInv?" (modo solo inventario)":""}.`);
   let ok=0,fallas=[];
   await pool(nuevas,4,async c=>{
     const path=`${slug(c.modelo)}/${slug(c.modelo)}-${slug(c.color)}-${c.producto_id}.jpg`;
