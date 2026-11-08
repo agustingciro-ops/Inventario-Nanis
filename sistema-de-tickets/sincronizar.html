@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sincronizar catálogo · Tickets Nanis</title>
+<style>
+:root{--bg:#f5f3ee;--card:#fff;--ink:#1f211c;--muted:#6a6c63;--line:#e3e0d6;--accent:#3d6b4c;--warn:#b4542a}
+@media (prefers-color-scheme: dark){:root{--bg:#161714;--card:#1f201c;--ink:#ecebe5;--muted:#a2a399;--line:#34352f;--accent:#74b88a;--warn:#e98a5c;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;padding:24px 16px}
+main{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+h1{margin:0;font-size:22px}
+p{margin:0;color:var(--muted)}
+textarea{width:100%;min-height:90px;background:var(--card);color:inherit;border:2px dashed var(--line);border-radius:10px;padding:12px;font:inherit}
+textarea:focus{outline:none;border-color:var(--accent)}
+pre{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;white-space:pre-wrap;font-size:13px;max-height:50vh;overflow:auto;margin:0}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Sincronizar catálogo desde TikTok</h1>
+  <p id="who">Revisando sesión…</p>
+  <p>Pega aquí (Ctrl+V) el catálogo copiado desde TikTok Seller Center. La sincronización empieza sola.</p>
+  <textarea id="paste" placeholder="Pega aquí el catálogo…"></textarea>
+  <pre id="log">Esperando catálogo…</pre>
+  <p><a href="./">← Volver a los tickets</a></p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+const SUPABASE_URL="https://mkioaykfhugkzhjmwnru.supabase.co";
+const SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1raW9heWtmaHVna3poam13bnJ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQxNjA2NzQsImV4cCI6MjEwOTczNjY3NH0.ru4gCHQD32CnXgvSVdB-YAg0kBuETftowTOHy8K9Eds";
+const BUCKET="fotos-de-productos";
+const CDN="https://p16-oec-general-useast5.ttcdn-us.com/";
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const $=s=>document.querySelector(s);
+const log=m=>{const el=$("#log");el.textContent=(el.textContent==="Esperando catálogo…"?"":el.textContent+"\n")+m;el.scrollTop=el.scrollHeight};
+const slug=s=>String(s).normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^A-Za-z0-9]+/g,"-").replace(/^-|-$/g,"")||"x";
+window.__syncResult=null;
+
+sb.auth.getSession().then(({data})=>{$("#who").textContent=data.session?"Sesión: "+data.session.user.email:"No has iniciado sesión. Entra primero en la página de tickets y vuelve aquí."});
+
+async function pool(items,n,fn){let i=0;const run=async()=>{while(i<items.length){const k=i++;await fn(items[k],k)}};await Promise.all(Array.from({length:n},run))}
+async function chunks(arr,size,fn){for(let i=0;i<arr.length;i+=size)await fn(arr.slice(i,i+size))}
+
+async function sincronizar(texto){
+  const t0=Date.now();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session)throw new Error("No hay sesión iniciada");
+  const cat=JSON.parse(texto);
+  if(!cat||cat.v!==1||!Array.isArray(cat.p))throw new Error("El texto pegado no es un catálogo válido");
+  log(`Catálogo de TikTok del ${new Date(cat.fecha).toLocaleString("es")}: ${cat.p.length} productos.`);
+  const ahora=new Date().toISOString();
+  const productos=[],colores=[],skus=[];
+  for(const [id,modelo,nombre,tipo,altura,cols,ss] of cat.p){
+    productos.push({id,modelo,nombre,tipo,altura,activo:true,actualizado:ahora});
+    cols.forEach(([color,uri])=>colores.push({producto_id:id,color,uri,modelo}));
+    ss.forEach(([sku_id,ci,talla,alt,stock])=>skus.push({sku_id,producto_id:id,color:cols[ci]?cols[ci][0]:"Único",talla,altura:alt||"",stock}));
+  }
+  // 1. productos
+  await chunks(productos,200,async c=>{const {error}=await sb.from("productos").upsert(c);if(error)throw error});
+  const ids=productos.map(p=>p.id);
+  const {data:viejos}=await sb.from("productos").select("id").eq("activo",true);
+  const inactivar=(viejos||[]).map(x=>x.id).filter(x=>!ids.includes(x));
+  if(inactivar.length){await sb.from("productos").update({activo:false}).in("id",inactivar);log(`${inactivar.length} productos ya no están activos en TikTok.`)}
+  // 2. fotos (solo las nuevas o cambiadas)
+  const {data:ya}=await sb.from("producto_colores").select("producto_id,color,foto,foto_origen");
+  const prev=new Map((ya||[]).map(r=>[r.producto_id+"|"+r.color,r]));
+  const nuevas=colores.filter(c=>{const r=prev.get(c.producto_id+"|"+c.color);return !r||r.foto_origen!==c.uri||!r.foto});
+  log(`Fotos: ${colores.length} en total, ${nuevas.length} por descargar.`);
+  let ok=0,fallas=[];
+  await pool(nuevas,4,async c=>{
+    const path=`${slug(c.modelo)}/${slug(c.modelo)}-${slug(c.color)}-${c.producto_id}.jpg`;
+    try{
+      if(!c.uri)throw new Error("sin foto en TikTok");
+      const r=await fetch(CDN+c.uri+"~tplv-fhlh96nyum-resize-jpeg:1000:1000.jpeg");
+      if(!r.ok)throw new Error("TikTok "+r.status);
+      const blob=await r.blob();
+      const {error}=await sb.storage.from(BUCKET).upload(path,blob,{upsert:true,contentType:"image/jpeg",cacheControl:"86400"});
+      if(error)throw error;
+      c.foto=path;ok++;
+      if(ok%20===0)log(`  ${ok} fotos subidas…`);
+    }catch(e){fallas.push(`${c.modelo} ${c.color}: ${e.message||e}`)}
+  });
+  log(`Fotos subidas: ${ok}.`+(fallas.length?` Fallaron ${fallas.length}:\n  `+fallas.join("\n  "):""));
+  const filasColores=colores.map(c=>{const r=prev.get(c.producto_id+"|"+c.color);return {producto_id:c.producto_id,color:c.color,foto:c.foto||(r&&r.foto)||"",foto_origen:c.foto?c.uri:((r&&r.foto_origen)||"")}});
+  await chunks(filasColores,300,async c=>{const {error}=await sb.from("producto_colores").upsert(c);if(error)throw error});
+  // colores que ya no existen en un producto
+  const claves=new Set(colores.map(c=>c.producto_id+"|"+c.color));
+  const sobran=(ya||[]).filter(r=>ids.includes(r.producto_id)&&!claves.has(r.producto_id+"|"+r.color));
+  for(const r of sobran)await sb.from("producto_colores").delete().eq("producto_id",r.producto_id).eq("color",r.color);
+  // 3. inventario
+  await chunks(skus,400,async c=>{const {error}=await sb.from("producto_skus").upsert(c);if(error)throw error});
+  const skuIds=new Set(skus.map(s=>s.sku_id));
+  const {data:skusDb}=await sb.from("producto_skus").select("sku_id").in("producto_id",ids).limit(10000);
+  const borrar=(skusDb||[]).map(x=>x.sku_id).filter(x=>!skuIds.has(x));
+  await chunks(borrar,200,async c=>{await sb.from("producto_skus").delete().in("sku_id",c)});
+  const conStock=skus.filter(s=>s.stock>0).length;
+  const res={productos:productos.length,fotos_total:colores.length,fotos_subidas:ok,fotos_fallidas:fallas.length,skus:skus.length,skus_con_stock:conStock,inactivados:inactivar.length,segundos:Math.round((Date.now()-t0)/1000)};
+  log(`Inventario: ${skus.length} variantes (${conStock} con existencias).\nListo en ${res.segundos} s.`);
+  window.__syncResult=res;
+  return res;
+}
+window.sincronizar=sincronizar;
+
+$("#paste").addEventListener("paste",e=>{
+  e.preventDefault();
+  const t=e.clipboardData.getData("text/plain");
+  $("#paste").value=`(${t.length.toLocaleString("es")} caracteres pegados)`;
+  $("#log").textContent="";
+  sincronizar(t).catch(err=>{log("Error: "+(err.message||err));window.__syncResult={error:String(err.message||err)}});
+});
+</script>
+</body>
+</html>
