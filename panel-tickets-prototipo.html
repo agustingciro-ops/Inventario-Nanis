@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel de Tickets</title>
+<style>
+:root{
+  --bg:#f6f5f2;--card:#fff;--ink:#1d1d1b;--muted:#6b6a66;--line:#e4e2dc;
+  --accent:#2f6b4f;--accent-ink:#fff;
+  --s-abierto:#2b6cb0;--s-proceso:#b7791f;--s-esperando:#805ad5;--s-solucionado:#2f855a;
+  --warn:#c05621;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#161615;--card:#1f1f1d;--ink:#ecebe7;--muted:#a3a29c;--line:#33322f;
+  --accent:#5fae86;--accent-ink:#0f1a14;
+  --s-abierto:#63a4e8;--s-proceso:#e0a84a;--s-esperando:#b19be8;--s-solucionado:#64c08d;--warn:#ec8a52;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:5}
+h1{font-size:18px;margin:0}
+.badge-proto{font-size:11px;background:var(--warn);color:#fff;padding:2px 8px;border-radius:99px;margin-left:8px;vertical-align:middle}
+.who{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
+select,input,textarea,button{font:inherit;color:inherit}
+select,input,textarea{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+textarea{resize:vertical;min-height:70px}
+button{cursor:pointer;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:8px 14px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button:disabled{opacity:.45;cursor:not-allowed}
+main{max-width:1200px;margin:0 auto;padding:16px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer}
+.stat b{display:block;font-size:22px}
+.stat span{font-size:12px;color:var(--muted)}
+.stat.on{outline:2px solid var(--accent)}
+.toolbar{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;margin-bottom:14px}
+@media (max-width:720px){.toolbar{grid-template-columns:1fr 1fr}.toolbar input{grid-column:1/-1}}
+.layout{display:grid;grid-template-columns:minmax(280px,420px) 1fr;gap:14px;align-items:start}
+@media (max-width:860px){.layout{grid-template-columns:1fr}}
+.list{display:flex;flex-direction:column;gap:8px}
+.tk{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer}
+.tk.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.tk .top{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:var(--muted)}
+.tk .name{font-weight:600;margin:2px 0}
+.tk .meta{font-size:13px;color:var(--muted)}
+.pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;color:#fff;white-space:nowrap}
+.pill.Abierto{background:var(--s-abierto)}.pill.En\ proceso{background:var(--s-proceso)}
+.pill.Esperando\ al\ cliente{background:var(--s-esperando)}.pill.Solucionado{background:var(--s-solucionado)}
+.due{color:var(--warn);font-weight:600}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.panel h2{margin:0 0 4px;font-size:18px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:520px){.grid2{grid-template-columns:1fr}}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.field{margin-bottom:10px}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px 16px;margin:12px 0}
+.kv div span{display:block;font-size:12px;color:var(--muted)}
+.notes{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}
+.note{border-left:3px solid var(--line);padding:4px 10px;margin-bottom:10px}
+.note.sys{border-left-color:var(--accent);color:var(--muted);font-size:13px}
+.note small{color:var(--muted);display:block;font-size:12px}
+.lock{background:var(--bg);border:1px dashed var(--line);border-radius:8px;padding:10px;font-size:13px;color:var(--muted);margin:10px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.empty{color:var(--muted);text-align:center;padding:30px}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);max-width:620px;width:calc(100% - 32px);padding:18px}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+a.link{color:var(--accent);cursor:pointer;text-decoration:underline}
+</style>
+</head>
+<body>
+<header>
+  <h1>Tickets de clientes <span class="badge-proto">PROTOTIPO</span></h1>
+  <div class="who">Estás escribiendo como
+    <select id="user" style="width:auto">
+      <option>Agustín</option><option>Socia</option><option>Asistente</option>
+    </select>
+    <button class="primary" id="btnNew">+ Nuevo ticket</button>
+  </div>
+</header>
+
+<main>
+  <div class="stats" id="stats"></div>
+  <div class="toolbar">
+    <input id="q" placeholder="Buscar por TK-0001, clienta o producto…">
+    <select id="fStatus"><option value="">Todos los estados</option></select>
+    <select id="fReason"><option value="">Todos los motivos</option></select>
+    <button id="btnClear">Limpiar</button>
+  </div>
+  <div class="layout">
+    <div class="list" id="list"></div>
+    <div class="panel" id="detail"><div class="empty">Escoge un ticket para ver el detalle</div></div>
+  </div>
+</main>
+
+<dialog id="dlg">
+  <form id="form" method="dialog">
+    <h2 style="margin-top:0" id="dlgTitle">Nuevo ticket</h2>
+    <div id="refInfo" class="lock" style="display:none"></div>
+    <div class="grid2">
+      <div class="field"><label>Nombre de la clienta *</label><input name="name" required></div>
+      <div class="field"><label>WhatsApp *</label><input name="phone" required placeholder="+1 407 555 0000"></div>
+      <div class="field"><label>N.º de orden TikTok</label><input name="order"></div>
+      <div class="field"><label>Motivo *</label><select name="reason" required></select></div>
+      <div class="field"><label>Modelo</label><input name="model"></div>
+      <div class="field"><label>Talla</label><input name="size"></div>
+      <div class="field"><label>Color</label><input name="color"></div>
+      <div class="field"><label>Responsable</label><select name="owner"></select></div>
+      <div class="field"><label>Próximo seguimiento (recordatorio)</label><input type="date" name="follow"></div>
+    </div>
+    <div class="field"><label>Primera nota *</label><textarea name="note" required placeholder="¿Qué pidió la clienta?"></textarea></div>
+    <div class="row" style="justify-content:flex-end">
+      <button value="cancel" formnovalidate>Cancelar</button>
+      <button class="primary" value="ok">Crear ticket</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const STATUSES=["Abierto","En proceso","Esperando al cliente","Solucionado"];
+const REASONS=["Estado del pedido","Cambio de talla","Devolución","Producto dañado o equivocado","Otro"];
+const USERS=["Agustín","Socia","Asistente"];
+const $=s=>document.querySelector(s);
+const today=()=>new Date().toISOString().slice(0,10);
+const addDays=d=>{const x=new Date();x.setDate(x.getDate()+d);return x.toISOString().slice(0,10)};
+const fmt=iso=>new Date(iso).toLocaleString("es",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+let seq=0, selected=null, filterStatus="", refFor=null;
+const tickets=[];
+function ago(h){return new Date(Date.now()-h*3600e3).toISOString()}
+function mk(t){seq++;const tk={id:"TK-"+String(seq).padStart(4,"0"),created:t.created||new Date().toISOString(),status:"Abierto",ref:null,follow:"",...t};tickets.unshift(tk);return tk}
+
+// Datos de ejemplo
+mk({created:ago(200),name:"Carolina Restrepo",phone:"+1 407 555 0142",order:"577201934",model:"Sandalia Lucía",size:"7",color:"Beige",reason:"Cambio de talla",owner:"Agustín",status:"Solucionado",
+ notes:[{by:"Agustín",at:ago(200),text:"Le quedó pequeña, pide talla 8."},{by:"Socia",at:ago(150),text:"Se envió la talla 8, guía USPS 9400…"},{by:"Socia",at:ago(120),sys:true,text:"Estado: Esperando al cliente → Solucionado"}]});
+mk({created:ago(52),name:"Diana Morales",phone:"+1 863 555 0199",order:"577305512",model:"Bota Valentina",size:"6",color:"Negro",reason:"Producto dañado o equivocado",owner:"Socia",status:"En proceso",follow:today(),
+ notes:[{by:"Socia",at:ago(52),text:"Llegó con la suela despegada. Mandó fotos."},{by:"Agustín",at:ago(30),text:"Aprobado reemplazo. Falta confirmar disponibilidad en talla 6."}]});
+mk({created:ago(26),name:"Paola Gómez",phone:"+1 321 555 0177",order:"577340021",model:"Mocasín Isabela",size:"8",color:"Café",reason:"Devolución",owner:"Agustín",status:"Esperando al cliente",follow:addDays(2),
+ notes:[{by:"Agustín",at:ago(26),text:"Quiere devolver. Se le envió la etiqueta de devolución."}]});
+mk({created:ago(3),name:"Lina Castaño",phone:"+1 407 555 0110",order:"577388870",model:"Sandalia Lucía",size:"9",color:"Blanco",reason:"Estado del pedido",owner:"Asistente",status:"Abierto",
+ notes:[{by:"Asistente",at:ago(3),text:"Pregunta cuándo llega su pedido, lleva 6 días."}]});
+
+function fillSelect(el,arr,first){el.innerHTML=(first?`<option value="">${first}</option>`:"")+arr.map(x=>`<option>${x}</option>`).join("")}
+fillSelect($("#fStatus"),STATUSES,"Todos los estados");
+fillSelect($("#fReason"),REASONS,"Todos los motivos");
+fillSelect($("#form").reason,REASONS);
+fillSelect($("#form").owner,USERS);
+
+function filtered(){
+  const q=$("#q").value.trim().toLowerCase(), st=$("#fStatus").value||filterStatus, rs=$("#fReason").value;
+  return tickets.filter(t=>(!st||t.status===st)&&(!rs||t.reason===rs)&&
+    (!q||[t.id,t.name,t.model,t.color,t.size,t.order,t.phone].join(" ").toLowerCase().includes(q)));
+}
+function renderStats(){
+  const due=tickets.filter(t=>t.status!=="Solucionado"&&t.follow&&t.follow<=today()).length;
+  const cards=STATUSES.map(s=>`<div class="stat ${filterStatus===s?"on":""}" data-s="${s}"><b>${tickets.filter(t=>t.status===s).length}</b><span>${s}</span></div>`).join("");
+  $("#stats").innerHTML=cards+`<div class="stat" data-due="1"><b class="due">${due}</b><span>Seguimiento hoy o vencido</span></div>`;
+  document.querySelectorAll(".stat[data-s]").forEach(el=>el.onclick=()=>{filterStatus=filterStatus===el.dataset.s?"":el.dataset.s;$("#fStatus").value="";render()});
+  document.querySelector(".stat[data-due]").onclick=()=>{$("#q").value="";filterStatus="";const first=tickets.find(t=>t.status!=="Solucionado"&&t.follow&&t.follow<=today());if(first){selected=first.id;}render()};
+}
+function renderList(){
+  const arr=filtered();
+  $("#list").innerHTML=arr.length?arr.map(t=>{
+    const isDue=t.status!=="Solucionado"&&t.follow&&t.follow<=today();
+    return `<div class="tk ${selected===t.id?"sel":""}" data-id="${t.id}">
+      <div class="top"><span>${t.id}${t.ref?" · ↩ "+t.ref:""}</span><span class="pill ${t.status}">${t.status}</span></div>
+      <div class="name">${esc(t.name)}</div>
+      <div class="meta">${esc(t.reason)} · ${esc([t.model,t.size&&"T"+t.size,t.color].filter(Boolean).join(" "))}</div>
+      <div class="meta">${esc(t.owner)} · ${fmt(t.created)} ${isDue?'· <span class="due">seguimiento pendiente</span>':""}</div>
+    </div>`}).join(""):`<div class="empty">No hay tickets con esos filtros</div>`;
+  document.querySelectorAll(".tk").forEach(el=>el.onclick=()=>{selected=el.dataset.id;render()});
+}
+function renderDetail(){
+  const t=tickets.find(x=>x.id===selected);
+  if(!t){$("#detail").innerHTML=`<div class="empty">Escoge un ticket para ver el detalle</div>`;return}
+  const locked=t.status==="Solucionado";
+  const prev=t.ref?`<a class="link" data-go="${t.ref}">${t.ref}</a>`:"—";
+  const later=tickets.filter(x=>x.ref===t.id).map(x=>`<a class="link" data-go="${x.id}">${x.id}</a>`).join(", ");
+  $("#detail").innerHTML=`
+    <div class="row" style="justify-content:space-between"><h2>${t.id} · ${esc(t.name)}</h2><span class="pill ${t.status}">${t.status}</span></div>
+    <div class="kv">
+      <div><span>WhatsApp</span>${esc(t.phone)}</div>
+      <div><span>Orden TikTok</span>${esc(t.order)||"—"}</div>
+      <div><span>Producto</span>${esc([t.model,t.size&&"Talla "+t.size,t.color].filter(Boolean).join(" · "))||"—"}</div>
+      <div><span>Motivo</span>${esc(t.reason)}</div>
+      <div><span>Creado</span>${fmt(t.created)}</div>
+      <div><span>Ticket anterior</span>${prev}</div>
+      ${later?`<div><span>Tickets posteriores</span>${later}</div>`:""}
+    </div>
+    ${locked?`<div class="lock">🔒 Este ticket está solucionado y bloqueado. No se puede editar ni agregar notas. Si la clienta vuelve, crea un ticket nuevo que referencie este.</div>
+      <button class="primary" id="btnReopen">Crear ticket nuevo para esta clienta</button>`:`
+    <div class="grid2">
+      <div class="field"><label>Estado</label><select id="dStatus">${STATUSES.map(s=>`<option ${s===t.status?"selected":""}>${s}</option>`).join("")}</select></div>
+      <div class="field"><label>Responsable</label><select id="dOwner">${USERS.map(s=>`<option ${s===t.owner?"selected":""}>${s}</option>`).join("")}</select></div>
+      <div class="field"><label>Próximo seguimiento</label><input type="date" id="dFollow" value="${t.follow||""}"></div>
+      <div class="field"><label>&nbsp;</label><div class="lock" style="margin:0;padding:8px">💬 Con WhatsApp conectado, aquí se programaría el mensaje automático.</div></div>
+    </div>`}
+    <div class="notes">
+      <b>Historial</b> <small style="color:var(--muted)">(las notas no se pueden editar ni borrar)</small>
+      <div style="margin-top:10px">${t.notes.map(n=>`<div class="note ${n.sys?"sys":""}"><small>${esc(n.by)} · ${fmt(n.at)}</small>${esc(n.text)}</div>`).join("")}</div>
+      ${locked?"":`<div class="field"><textarea id="dNote" placeholder="Escribe una nota como ${esc($("#user").value)}…"></textarea></div>
+      <div class="row" style="justify-content:flex-end"><button class="primary" id="btnNote">Agregar nota</button></div>`}
+    </div>`;
+  document.querySelectorAll("[data-go]").forEach(a=>a.onclick=()=>{selected=a.dataset.go;$("#q").value="";filterStatus="";$("#fStatus").value="";render()});
+  if(locked){$("#btnReopen").onclick=()=>openNew(t);return}
+  const sysNote=text=>t.notes.push({by:$("#user").value,at:new Date().toISOString(),sys:true,text});
+  $("#dStatus").onchange=e=>{
+    const ns=e.target.value;
+    if(ns==="Solucionado"&&!confirm("Al marcarlo como Solucionado el ticket queda bloqueado para siempre. ¿Continuar?")){e.target.value=t.status;return}
+    sysNote(`Estado: ${t.status} → ${ns}`);t.status=ns;if(ns==="Solucionado")t.follow="";render()};
+  $("#dOwner").onchange=e=>{sysNote(`Responsable: ${t.owner} → ${e.target.value}`);t.owner=e.target.value;render()};
+  $("#dFollow").onchange=e=>{t.follow=e.target.value;sysNote(e.target.value?`Seguimiento programado para ${e.target.value}`:"Seguimiento quitado");render()};
+  $("#btnNote").onclick=()=>{const v=$("#dNote").value.trim();if(!v)return;t.notes.push({by:$("#user").value,at:new Date().toISOString(),text:v});render()};
+}
+function render(){renderStats();renderList();renderDetail()}
+
+function openNew(from){
+  const f=$("#form");f.reset();refFor=from?from.id:null;
+  $("#refInfo").style.display=from?"block":"none";
+  $("#dlgTitle").textContent=from?"Nuevo ticket (clienta que vuelve)":"Nuevo ticket";
+  if(from){$("#refInfo").textContent=`Este ticket quedará vinculado a ${from.id}.`;
+    ["name","phone","order","model","size","color"].forEach(k=>f[k].value=from[k]||"");}
+  f.owner.value=$("#user").value;
+  $("#dlg").showModal();
+}
+$("#btnNew").onclick=()=>openNew(null);
+$("#dlg").addEventListener("close",()=>{
+  if($("#dlg").returnValue!=="ok")return;
+  const f=$("#form"),v=k=>f[k].value.trim();
+  const tk=mk({name:v("name"),phone:v("phone"),order:v("order"),model:v("model"),size:v("size"),color:v("color"),reason:v("reason"),owner:v("owner"),follow:v("follow"),ref:refFor,
+    notes:[{by:$("#user").value,at:new Date().toISOString(),text:v("note")}]});
+  if(refFor)tk.notes.unshift({by:$("#user").value,at:new Date().toISOString(),sys:true,text:`Creado como seguimiento de ${refFor}`});
+  selected=tk.id;filterStatus="";$("#fStatus").value="";$("#q").value="";render();
+});
+["#q","#fStatus","#fReason"].forEach(s=>$(s).addEventListener("input",()=>{if(s==="#fStatus")filterStatus="";render()}));
+$("#btnClear").onclick=()=>{$("#q").value="";$("#fStatus").value="";$("#fReason").value="";filterStatus="";render()};
+render();
+</script>
+</body>
+</html>
