@@ -38,7 +38,9 @@ button.primary{background:var(--accent);color:var(--accent-ink);border-color:var
 button:disabled{opacity:.45;cursor:not-allowed}
 main.wrap{max-width:1240px;margin:0 auto;padding-block:16px 40px}
 .notice{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:12px}
-.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.stat.mine{border-color:var(--accent)}
+.stat.mine b{color:var(--accent)}
 @media (max-width:720px){.stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .stat{text-align:left;padding:10px 12px;border-radius:10px}
 .stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
@@ -174,7 +176,7 @@ function status(m){$("#status").hidden=!m;$("#status").textContent=m||""}
 function ask(title,text,yes){return new Promise(res=>{const d=$("#dlgConfirm");$("#cTitle").textContent=title;$("#cText").textContent=text;$("#cYes").textContent=yes||"Confirmar";
   const done=v=>{d.close();res(v)};$("#cYes").onclick=()=>done(true);$("#cNo").onclick=()=>done(false);d.showModal()})}
 
-let sb=null,tickets=[],notes=[],selected=null,filterStatus="",refFor=null,notesChan=null,started=false;
+let sb=null,tickets=[],notes=[],selected=null,filterStatus="",refFor=null,notesChan=null,started=false,mine=false;
 
 function fillSelect(el,arr,first){el.innerHTML=(first?`<option value="">${first}</option>`:"")+arr.map(x=>`<option>${esc(x)}</option>`).join("")}
 fillSelect($("#fStatus"),STATUSES,"Todos los estados");fillSelect($("#fReason"),REASONS,"Todos los motivos");fillSelect($("#f_reason"),REASONS);
@@ -186,13 +188,15 @@ function refreshOwnerFilter(){const el=$("#fOwner"),v=el.value;fillSelect(el,own
 const isDue=t=>t.status!=="Solucionado"&&t.follow&&t.follow<=localDay();
 function filtered(){
   const q=$("#q").value.trim().toLowerCase(),st=$("#fStatus").value,rs=$("#fReason").value,ow=$("#fOwner").value;
-  return tickets.filter(t=>(filterStatus==="__due"?isDue(t):(!filterStatus||t.status===filterStatus))&&(!st||t.status===st)&&(!rs||t.reason===rs)&&(!ow||t.owner===ow)&&
+  return tickets.filter(t=>(filterStatus==="__due"?isDue(t):(!filterStatus||t.status===filterStatus))&&(!st||t.status===st)&&(!rs||t.reason===rs)&&(!ow||t.owner===ow)&&(!mine||t.owner===ME)&&
    (!q||[code(t.id),t.name,t.model,t.color,t.size,t.order_no,t.phone].join(" ").toLowerCase().includes(q)));
 }
 function renderStats(){
-  $("#stats").innerHTML=STATUSES.map(s=>`<button class="stat ${filterStatus===s?"on":""}" data-s="${s}"><b>${tickets.filter(t=>t.status===s).length}</b><span>${s}</span></button>`).join("")
+  const myOpen=tickets.filter(t=>t.owner===ME&&t.status!=="Solucionado").length;
+  $("#stats").innerHTML=`<button class="stat mine ${mine?"on":""}" id="btnMine" title="Casos donde tú eres la responsable"><b>${myOpen}</b><span>Mis casos abiertos</span></button>`+STATUSES.map(s=>`<button class="stat ${filterStatus===s?"on":""}" data-s="${s}"><b>${tickets.filter(t=>t.status===s).length}</b><span>${s}</span></button>`).join("")
    +`<button class="stat ${filterStatus==="__due"?"on":""}" data-s="__due"><b class="due">${tickets.filter(isDue).length}</b><span>Seguimiento hoy o vencido</span></button>`;
-  document.querySelectorAll(".stat").forEach(el=>el.onclick=()=>{filterStatus=filterStatus===el.dataset.s?"":el.dataset.s;$("#fStatus").value="";render()});
+  $("#btnMine").onclick=()=>{mine=!mine;if(mine&&!filterStatus&&!$("#fStatus").value)filterStatus="";render()};
+  document.querySelectorAll(".stat[data-s]").forEach(el=>el.onclick=()=>{filterStatus=filterStatus===el.dataset.s?"":el.dataset.s;$("#fStatus").value="";render()});
 }
 function renderList(){
   if(!tickets.length){$("#list").innerHTML=`<div class="panel empty">Todavía no hay tickets.<br>Toca <b>+ Nuevo ticket</b> para registrar la primera clienta.</div>`;return}
@@ -312,7 +316,7 @@ $("#form").addEventListener("submit",async e=>{
   finally{btn.disabled=false;btn.textContent="Crear ticket"}
 });
 ["#q","#fStatus","#fReason","#fOwner"].forEach(s=>$(s).addEventListener("input",()=>{if(s==="#fStatus")filterStatus="";render()}));
-$("#btnClear").onclick=()=>{$("#q").value="";$("#fStatus").value="";$("#fReason").value="";$("#fOwner").value="";filterStatus="";render()};
+$("#btnClear").onclick=()=>{$("#q").value="";$("#fStatus").value="";$("#fReason").value="";$("#fOwner").value="";filterStatus="";mine=false;render()};
 
 /* ---------- entrar / salir ---------- */
 $("#loginForm").addEventListener("submit",async e=>{
