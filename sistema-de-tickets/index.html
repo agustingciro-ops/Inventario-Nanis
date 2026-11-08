@@ -87,7 +87,7 @@ dialog h2{margin:0 0 12px;font:600 20px/1.2 var(--display)}
 <header><div class="wrap">
   <h1><a href="../pagina-de-tickets/panel-principal-nanis-boutique.html" title="Volver al panel principal">Tickets Nanis</a></h1>
   <div class="hright" id="hright" hidden>
-    <div class="who"><label for="user" style="margin:0">Escribe</label><select id="user" style="width:auto"></select></div>
+    <div class="who" id="me" title="Sesión iniciada"></div>
     <button class="primary" id="btnNew">+ Nuevo ticket</button>
     <button id="btnOut">Salir</button>
   </div>
@@ -161,8 +161,7 @@ const SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSI
 
 const STATUSES=["Abierto","En proceso","Esperando al cliente","Solucionado"];
 const REASONS=["Estado del pedido","Cambio de talla","Devolución","Producto dañado o equivocado","Otro"];
-const USERS=["Carolina","Nanis","Nueva"];
-const DEFAULT_OWNER="Carolina";
+let ME=""; // correo de quien inició sesión: es quien crea, comenta y queda de responsable por defecto
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const localDay=(d=new Date())=>new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
@@ -177,10 +176,10 @@ function ask(title,text,yes){return new Promise(res=>{const d=$("#dlgConfirm");$
 let sb=null,tickets=[],notes=[],selected=null,filterStatus="",refFor=null,notesChan=null,started=false;
 
 function fillSelect(el,arr,first){el.innerHTML=(first?`<option value="">${first}</option>`:"")+arr.map(x=>`<option>${esc(x)}</option>`).join("")}
-fillSelect($("#user"),USERS);fillSelect($("#fStatus"),STATUSES,"Todos los estados");fillSelect($("#fReason"),REASONS,"Todos los motivos");
-fillSelect($("#fOwner"),USERS,"Todas las responsables");fillSelect($("#f_reason"),REASONS);fillSelect($("#f_owner"),USERS);
-try{const u=localStorage.getItem("tk_user");if(USERS.includes(u))$("#user").value=u}catch{}
-$("#user").onchange=()=>{try{localStorage.setItem("tk_user",$("#user").value)}catch{};renderDetail()};
+fillSelect($("#fStatus"),STATUSES,"Todos los estados");fillSelect($("#fReason"),REASONS,"Todos los motivos");fillSelect($("#f_reason"),REASONS);
+// responsables posibles: quien inició sesión + todas las personas que ya aparecen en los tickets
+function owners(){const s=new Set([ME]);tickets.forEach(t=>{if(t.owner)s.add(t.owner);if(t.created_by)s.add(t.created_by)});s.delete("");return [...s].sort()}
+function refreshOwnerFilter(){const el=$("#fOwner"),v=el.value;fillSelect(el,owners(),"Todos los responsables");el.value=owners().includes(v)?v:""}
 
 /* ---------- render ---------- */
 const isDue=t=>t.status!=="Solucionado"&&t.follow&&t.follow<=localDay();
@@ -236,12 +235,12 @@ function renderDetail(){
      <div><button class="primary" id="btnReopen">Crear ticket nuevo para esta clienta</button></div></div>`:`
    <div class="grid3">
     <div class="field"><label for="dStatus">Estado</label><select id="dStatus">${STATUSES.map(s=>`<option ${s===t.status?"selected":""}>${s}</option>`).join("")}</select></div>
-    <div class="field"><label for="dOwner">Responsable</label><select id="dOwner">${USERS.map(s=>`<option ${s===t.owner?"selected":""}>${s}</option>`).join("")}</select></div>
+    <div class="field"><label for="dOwner">Responsable</label><select id="dOwner">${owners().map(s=>`<option ${s===t.owner?"selected":""}>${s}</option>`).join("")}</select></div>
     <div class="field"><label for="dFollow">Próximo seguimiento</label><input type="date" id="dFollow" value="${esc(t.follow||"")}"></div>
    </div>`}
    <div class="notes"><b>Historial</b> <small style="color:var(--muted)">· las notas no se pueden editar ni borrar</small>
     ${notes===null?`<div class="note sys">Cargando notas…</div>`:notes.map(n=>`<div class="note ${n.sys?"sys":""}"><small>${esc(n.by_name)} · ${fmt(n.created_at)}</small>${esc(n.body)}</div>`).join("")}
-    ${locked?"":`<div class="stack" style="margin-top:12px"><textarea id="dNote" placeholder="Escribe una nota como ${esc($("#user").value)}…"></textarea>
+    ${locked?"":`<div class="stack" style="margin-top:12px"><textarea id="dNote" placeholder="Escribe una nota (queda firmada por ${esc(ME)})…"></textarea>
      <div class="row" style="justify-content:flex-end"><button class="primary" id="btnNote">Agregar nota</button></div></div>`}
    </div>`;
   if($("#dNote"))$("#dNote").value=draft;
@@ -262,7 +261,8 @@ function renderDetail(){
 function render(){renderStats();renderList();renderDetail()}
 
 /* ---------- datos ---------- */
-const addNote=(id,body,sys)=>sb.from("notes").insert({ticket_id:id,by_name:$("#user").value,body,sys:!!sys});
+// la base de datos reemplaza by_name / created_by por el correo de la sesión, así nadie puede firmar por otra persona
+const addNote=(id,body,sys)=>sb.from("notes").insert({ticket_id:id,by_name:ME,body,sys:!!sys});
 async function change(t,patch,noteText){
   // la nota va primero: con el ticket ya solucionado la base de datos no acepta notas nuevas
   const n=await addNote(t.id,noteText,true);
@@ -273,9 +273,10 @@ async function change(t,patch,noteText){
 async function loadTickets(){
   const {data,error}=await sb.from("tickets").select("*").order("id",{ascending:false});
   if(error){status("No se pudieron cargar los tickets. Revisa tu conexión y recarga la página.");return}
-  status("");tickets=data;render();
+  status("");tickets=data;refreshOwnerFilter();render();
 }
-async function startApp(){
+async function startApp(session){
+  ME=session?.user?.email||"";$("#me").textContent=ME;
   if(started)return;started=true;
   $("#login").hidden=true;$("#app").hidden=false;$("#hright").hidden=false;
   status("Cargando tickets…");await loadTickets();
@@ -292,14 +293,14 @@ function openNew(from){
   $("#refInfo").hidden=!from;$("#dlgTitle").textContent=from?"Nuevo ticket (clienta que vuelve)":"Nuevo ticket";
   if(from){$("#refInfo").textContent=`Este ticket quedará vinculado a ${code(from.id)}.`;
     f.name.value=from.name||"";f.phone.value=from.phone||"";f.order.value=from.order_no||"";f.model.value=from.model||"";f.size.value=from.size||"";f.color.value=from.color||""}
-  f.owner.value=DEFAULT_OWNER;$("#dlg").showModal();
+  fillSelect(f.owner,owners());f.owner.value=ME;$("#dlg").showModal();
 }
 $("#btnNew").onclick=()=>openNew(null);
 $("#btnCancel").onclick=()=>$("#dlg").close();
 $("#form").addEventListener("submit",async e=>{
   e.preventDefault();const f=$("#form"),v=k=>f[k].value.trim(),btn=$("#btnCreate");btn.disabled=true;btn.textContent="Creando…";
   try{
-    const me=$("#user").value;
+    const me=ME;
     const {data,error}=await sb.from("tickets").insert({name:v("name"),phone:v("phone"),order_no:v("order"),model:v("model"),size:v("size"),color:v("color"),
       reason:v("reason"),owner:v("owner"),follow:v("follow")||null,ref_id:refFor,created_by:me}).select().single();
     if(error)throw error;
@@ -326,7 +327,7 @@ if(!window.supabase||SUPABASE_URL.startsWith("__")){status("El sistema todavía 
 else{
   sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
   // setTimeout: supabase-js no permite llamar la base de datos dentro de este aviso
-  sb.auth.onAuthStateChange((ev,session)=>{setTimeout(()=>session?startApp():showLogin(),0)});
+  sb.auth.onAuthStateChange((ev,session)=>{setTimeout(()=>session?startApp(session):showLogin(),0)});
 }
 </script>
 </body>
