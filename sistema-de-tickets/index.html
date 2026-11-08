@@ -83,7 +83,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 dialog h2{margin:0 0 12px;font:600 20px/1.2 var(--display)}
 .login{max-width:400px;margin:10vh auto 0}
 dialog.wide{max-width:1040px}
-.pfilters{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:8px;margin-bottom:8px}
+.pfilters{display:grid;grid-template-columns:2fr repeat(3,1fr);gap:8px;margin-bottom:8px}
 @media (max-width:760px){.pfilters{grid-template-columns:1fr 1fr}.pfilters #pq{grid-column:1/-1}}
 .chk{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted);margin:0}
 .chk input{width:auto}
@@ -172,8 +172,7 @@ dialog.wide{max-width:1040px}
   <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">Buscar productos</h2><button id="pClose">Cerrar</button></div>
   <div class="pfilters">
     <input id="pq" placeholder="Modelo (ej. Mireya, Sol, W68)…">
-    <select id="pTipo"></select>
-    <select id="pAltura"></select>
+    <select id="pEstilo"></select>
     <select id="pColor"></select>
     <select id="pTalla"></select>
   </div>
@@ -185,9 +184,12 @@ dialog.wide{max-width:1040px}
   <div class="selbar">
     <span id="pSel" style="color:var(--muted)">Toca las fotos para seleccionarlas</span>
     <div class="row">
+      <button id="pAll">Seleccionar todas</button>
       <button id="pNone">Quitar selección</button>
       <button id="pTxt">Copiar texto</button>
-      <button class="primary" id="pCopy">Copiar foto</button>
+      <button id="pDl">Descargar</button>
+      <button id="pShare" hidden>Compartir</button>
+      <button class="primary" id="pCopy">Copiar en una imagen</button>
     </div>
   </div>
 </dialog>
@@ -361,8 +363,19 @@ $("#btnClear").onclick=()=>{$("#q").value="";$("#fStatus").value="";$("#fReason"
 
 /* ---------- buscador de productos ---------- */
 const FOTO_URL=p=>`${SUPABASE_URL}/storage/v1/object/public/fotos-de-productos/${p.split("/").map(encodeURIComponent).join("/")}`;
-let cat=null,picked=[],copyPos=0;
+const ESTILOS=["Flat","3 cm","6 cm","Plataformas","Tenis"];
+let cat=null,picked=[];
 const tallaNum=t=>{const n=parseFloat(String(t).replace(",","."));return isNaN(n)?999:n};
+// Agrupa la altura de TikTok en los 5 estilos de la tienda
+function estiloDe(pr,altura){
+  if(pr.tipo==="Tenis"||/sneaker|tenis|trainer/i.test(pr.nombre))return "Tenis";
+  const a=String(altura||pr.altura||"");
+  if(/flat/i.test(a))return "Flat";
+  const n=parseFloat(a);
+  if(!isNaN(n))return n<=4?"3 cm":n<10?"6 cm":"Plataformas";
+  if(/platform|plataforma|wedge|chunky/i.test(pr.nombre))return "Plataformas";
+  return "Flat";
+}
 async function loadCatalog(){
   $("#pInfo").textContent="Cargando catálogo…";
   const [p,c,s]=await Promise.all([
@@ -373,68 +386,88 @@ async function loadCatalog(){
   const prod=new Map(p.data.map(x=>[x.id,x]));
   const items=[];
   c.data.forEach(col=>{const pr=prod.get(col.producto_id);if(!pr)return;
-    const vs=s.data.filter(v=>v.producto_id===col.producto_id&&v.color===col.color);
-    items.push({key:col.producto_id+"|"+col.color,modelo:pr.modelo,nombre:pr.nombre,tipo:pr.tipo,altura:pr.altura,color:col.color,foto:col.foto,vs});});
+    const vs=s.data.filter(v=>v.producto_id===col.producto_id&&v.color===col.color).map(v=>({...v,estilo:estiloDe(pr,v.altura)}));
+    const estilos=[...new Set(vs.length?vs.map(v=>v.estilo):[estiloDe(pr,pr.altura)])];
+    items.push({key:col.producto_id+"|"+col.color,modelo:pr.modelo,nombre:pr.nombre,estilos,color:col.color,foto:col.foto,vs});});
   items.sort((a,b)=>a.modelo.localeCompare(b.modelo,"es")||a.color.localeCompare(b.color,"es"));
   const uniq=a=>[...new Set(a.filter(Boolean))];
-  const alturas=uniq(items.flatMap(i=>[i.altura,...i.vs.map(v=>v.altura)])).sort((a,b)=>(a==="Flat"?-1:b==="Flat"?1:tallaNum(a)-tallaNum(b)));
-  fillSelect($("#pTipo"),uniq(items.map(i=>i.tipo)).sort(),"Sandalias y tenis");
-  fillSelect($("#pAltura"),alturas,"Todas las alturas");
+  fillSelect($("#pEstilo"),ESTILOS,"Todos los estilos");
   fillSelect($("#pColor"),uniq(items.map(i=>i.color)).sort((a,b)=>a.localeCompare(b,"es")),"Todos los colores");
   fillSelect($("#pTalla"),uniq(items.flatMap(i=>i.vs.map(v=>v.talla))).sort((a,b)=>tallaNum(a)-tallaNum(b)),"Todas las tallas");
   cat=items;renderGallery();
 }
 function matches(i){
-  const q=$("#pq").value.trim().toLowerCase(),tipo=$("#pTipo").value,alt=$("#pAltura").value,col=$("#pColor").value,talla=$("#pTalla").value,agot=$("#pAgot").checked;
+  const q=$("#pq").value.trim().toLowerCase(),est=$("#pEstilo").value,col=$("#pColor").value,talla=$("#pTalla").value,agot=$("#pAgot").checked;
   if(q&&!(i.modelo+" "+i.nombre).toLowerCase().includes(q))return null;
-  if(tipo&&i.tipo!==tipo)return null;
   if(col&&i.color!==col)return null;
-  let vs=i.vs.filter(v=>(!alt||(v.altura||i.altura)===alt)&&(!talla||v.talla===talla));
-  if(alt&&!vs.length&&i.altura!==alt)return null;
+  if(est&&!i.estilos.includes(est))return null;
+  const vs=i.vs.filter(v=>(!est||v.estilo===est)&&(!talla||v.talla===talla));
   if(talla&&!vs.length)return null;
   const disp=vs.filter(v=>v.stock>0);
   if(!agot&&!disp.length)return null;
   return {disp,vs};
 }
+const tallasDe=m=>[...new Set(m.disp.map(v=>v.talla))].sort((a,b)=>tallaNum(a)-tallaNum(b));
+const estiloTxt=(i,m)=>{const e=[...new Set((m.vs.length?m.vs:i.vs).map(v=>v.estilo))];return (e.length?e:i.estilos).join(" / ")};
+let visibles=[];
 function renderGallery(){
   if(!cat)return;
-  const res=cat.map(i=>({i,m:matches(i)})).filter(x=>x.m);
+  const res=cat.map(i=>({i,m:matches(i)})).filter(x=>x.m);visibles=res.map(x=>x.i.key);
   $("#pInfo").textContent=`${res.length} resultado${res.length===1?"":"s"}`;
-  $("#pGal").innerHTML=res.length?res.map(({i,m})=>{const n=picked.indexOf(i.key);
-    const tallas=[...new Set(m.disp.map(v=>v.talla))].sort((a,b)=>tallaNum(a)-tallaNum(b));
+  $("#pGal").innerHTML=res.length?res.map(({i,m})=>{const n=picked.indexOf(i.key);const tallas=tallasDe(m);
     return `<button class="ph ${n>=0?"on":""}" data-k="${esc(i.key)}"><span class="num">${n>=0?n+1:""}</span>${m.disp.length?"":'<span class="out">Agotado</span>'}
       ${i.foto?`<img src="${FOTO_URL(i.foto)}" alt="${esc(i.modelo+" "+i.color)}" loading="lazy">`:'<img alt="">'}
-      <div class="cap"><b>${esc(i.modelo)}</b><span>${esc(i.color)}${i.altura?" · "+esc(i.altura):""}</span><small>${tallas.length?"Tallas: "+esc(tallas.join(" · ")):"Sin existencias"}</small></div></button>`}).join("")
+      <div class="cap"><b>${esc(i.modelo)}</b><span>${esc(i.color)} · ${esc(estiloTxt(i,m))}</span><small>${tallas.length?"Tallas: "+esc(tallas.join(" · ")):"Sin existencias"}</small></div></button>`}).join("")
    :`<div class="empty" style="grid-column:1/-1">${cat.length?"No hay productos con esos filtros":"El catálogo está vacío. Hay que sincronizarlo desde TikTok."}</div>`;
-  document.querySelectorAll(".ph").forEach(el=>el.onclick=()=>{const k=el.dataset.k,ix=picked.indexOf(k);ix>=0?picked.splice(ix,1):picked.push(k);copyPos=0;renderGallery()});
+  document.querySelectorAll(".ph").forEach(el=>el.onclick=()=>{const k=el.dataset.k,ix=picked.indexOf(k);ix>=0?picked.splice(ix,1):picked.push(k);renderGallery()});
   const n=picked.length;
   $("#pSel").textContent=n?`${n} seleccionada${n>1?"s":""}`:"Toca las fotos para seleccionarlas";
-  ["#pNone","#pTxt","#pCopy"].forEach(s=>$(s).disabled=!n);
-  $("#pCopy").textContent=n<=1?"Copiar foto":`Copiar foto ${copyPos+1} de ${n}`;
+  ["#pNone","#pTxt","#pCopy","#pDl","#pShare"].forEach(s=>$(s).disabled=!n);
+  $("#pAll").disabled=!visibles.length;
 }
-async function pngBlob(url){
-  const b=await (await fetch(url)).blob();if(b.type==="image/png")return b;
-  const img=await createImageBitmap(b);const c=document.createElement("canvas");c.width=img.width;c.height=img.height;c.getContext("2d").drawImage(img,0,0);
-  return await new Promise((res,rej)=>c.toBlob(x=>x?res(x):rej(new Error("png")),"image/png"));
+const elegidas=()=>picked.map(k=>cat.find(i=>i.key===k)).filter(i=>i&&i.foto).map(i=>({i,m:matches(i)||{disp:[],vs:[]}}));
+const etiqueta=({i,m})=>{const t=tallasDe(m);return `${i.modelo} – ${i.color}${t.length?" · tallas "+t.join(", "):""}`};
+const nombreArchivo=({i})=>`${i.modelo}-${i.color}`.normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^A-Za-z0-9]+/g,"-")+".jpg";
+async function blobDe(i){return await (await fetch(FOTO_URL(i.foto))).blob()}
+// Une todas las fotos elegidas en una sola imagen con el nombre y las tallas debajo de cada una
+async function collage(sel){
+  const n=sel.length,cols=n<=1?1:n<=4?2:n<=9?3:4,rows=Math.ceil(n/cols),S=600,L=64,G=12;
+  const c=document.createElement("canvas");c.width=cols*S+(cols+1)*G;c.height=rows*(S+L)+(rows+1)*G;
+  const x=c.getContext("2d");x.fillStyle="#ffffff";x.fillRect(0,0,c.width,c.height);
+  const imgs=await Promise.all(sel.map(async e=>createImageBitmap(await blobDe(e.i))));
+  imgs.forEach((im,k)=>{const cx=G+(k%cols)*(S+G),cy=G+Math.floor(k/cols)*(S+L+G);
+    const r=Math.max(S/im.width,S/im.height),w=im.width*r,h=im.height*r;
+    x.save();x.beginPath();x.rect(cx,cy,S,S);x.clip();x.drawImage(im,cx+(S-w)/2,cy+(S-h)/2,w,h);x.restore();
+    x.fillStyle="#1f211c";x.font="600 26px system-ui,sans-serif";x.textBaseline="middle";
+    let t=etiqueta(sel[k]);while(x.measureText(t).width>S-10&&t.length>4)t=t.slice(0,-2);
+    x.fillText(t,cx+4,cy+S+L/2);
+    x.fillStyle="#3d6b4c";x.beginPath();x.arc(cx+28,cy+28,20,0,7);x.fill();x.fillStyle="#fff";x.font="700 22px system-ui,sans-serif";x.textAlign="center";x.fillText(String(k+1),cx+28,cy+29);x.textAlign="left";});
+  return await new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error("png")),"image/png"));
 }
 $("#btnProd").onclick=()=>{$("#dlgProd").showModal();if(!cat)loadCatalog();else renderGallery()};
 $("#pClose").onclick=()=>$("#dlgProd").close();
-["#pq","#pTipo","#pAltura","#pColor","#pTalla","#pAgot"].forEach(s=>$(s).addEventListener("input",renderGallery));
-$("#pNone").onclick=()=>{picked=[];copyPos=0;renderGallery()};
-$("#pTxt").onclick=async()=>{
-  const lines=picked.map(k=>cat.find(i=>i.key===k)).filter(Boolean).map(i=>{const m=matches(i)||{disp:[]};const t=[...new Set(m.disp.map(v=>v.talla))].sort((a,b)=>tallaNum(a)-tallaNum(b));return `${i.modelo} – ${i.color}${i.altura?" ("+i.altura+")":""}${t.length?" · tallas "+t.join(", "):""}`});
-  try{await navigator.clipboard.writeText(lines.join("\n"));toast("Texto copiado")}catch{toast("No se pudo copiar")}
-};
+["#pq","#pEstilo","#pColor","#pTalla","#pAgot"].forEach(s=>$(s).addEventListener("input",renderGallery));
+$("#pAll").onclick=()=>{visibles.forEach(k=>{if(!picked.includes(k))picked.push(k)});renderGallery()};
+$("#pNone").onclick=()=>{picked=[];renderGallery()};
+$("#pTxt").onclick=async()=>{try{await navigator.clipboard.writeText(elegidas().map(etiqueta).join("\n"));toast("Texto copiado")}catch{toast("No se pudo copiar")}};
 $("#pCopy").onclick=async()=>{
-  if(!picked.length)return;if(copyPos>=picked.length)copyPos=0;
-  const i=cat.find(x=>x.key===picked[copyPos]);if(!i||!i.foto){toast("Esa foto no está disponible");return}
-  try{
-    await navigator.clipboard.write([new ClipboardItem({"image/png":pngBlob(FOTO_URL(i.foto))})]);
-    const cur=copyPos+1,tot=picked.length;
-    toast(tot>1?`Foto ${cur} de ${tot} copiada (${i.modelo} ${i.color}). Pégala en WhatsApp con Ctrl+V${cur<tot?" y vuelve por la siguiente":""}.`:`Foto copiada (${i.modelo} ${i.color}). Pégala en WhatsApp con Ctrl+V.`,6000);
-    copyPos=cur<tot?copyPos+1:0;
-  }catch(e){toast("Este navegador no dejó copiar la imagen. Prueba en Chrome o Edge de computador.",6000)}
-  renderGallery();
+  const sel=elegidas();if(!sel.length)return;
+  if(sel.length>16){toast("Para una sola imagen elige máximo 16 fotos.");return}
+  const btn=$("#pCopy");btn.disabled=true;btn.textContent="Preparando…";
+  try{await navigator.clipboard.write([new ClipboardItem({"image/png":collage(sel)})]);toast(`Copiadas ${sel.length} fotos en una sola imagen. Pégala en WhatsApp con Ctrl+V.`,6000)}
+  catch(e){toast("No se pudo copiar la imagen. Usa Descargar o Compartir.",6000)}
+  finally{btn.disabled=false;btn.textContent="Copiar en una imagen"}
+};
+$("#pDl").onclick=async()=>{
+  const sel=elegidas();toast(`Descargando ${sel.length} foto${sel.length>1?"s":""}…`);
+  for(const e of sel){try{const u=URL.createObjectURL(await blobDe(e.i));const a=document.createElement("a");a.href=u;a.download=nombreArchivo(e);document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),5000);await new Promise(r=>setTimeout(r,350))}catch{}}
+  toast("Fotos descargadas. En WhatsApp Web arrástralas todas juntas al chat.",6000);
+};
+if(navigator.canShare&&navigator.canShare({files:[new File([""],"a.jpg",{type:"image/jpeg"})]}))$("#pShare").hidden=false;
+$("#pShare").onclick=async()=>{
+  const sel=elegidas();
+  try{const files=await Promise.all(sel.map(async e=>new File([await blobDe(e.i)],nombreArchivo(e),{type:"image/jpeg"})));
+    await navigator.share({files,text:sel.map(etiqueta).join("\n")})}catch(e){if(e.name!=="AbortError")toast("No se pudo compartir. Usa Descargar.")}
 };
 
 /* ---------- entrar / salir ---------- */
