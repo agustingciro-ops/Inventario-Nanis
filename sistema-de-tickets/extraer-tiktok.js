@@ -29,7 +29,8 @@
     const altP = alturaDe(p.product_name);
     const skus = (p.skus || []).map(s => {
       const g = re => (s.properties || []).find(x => re.test(x.name))?.value_name?.trim() || '';
-      const stock = (s.quantities || []).reduce((a, q) => a + (q.available_quantity || 0), 0);
+      // Stock físico en la bodega de Davenport (= columna "Total in-stock quantity in Shop location Davenport" del Excel), no "Available quantity"
+      const stock = (s.quantities || []).filter(q => /davenport/i.test(q.warehouse?.name || '')).reduce((a, q) => a + (q.total_quantity || 0), 0);
       const alt = g(/altura|height/i);
       const cv = (s.properties || []).find(x => /color/i.test(x.name));
       return [s.id, colorProp && cv ? (cIdx[String(cv.value_id)] ?? 0) : 0, g(/talla|size/i), alt ? alturaDe(alt) || alt : altP, stock];
