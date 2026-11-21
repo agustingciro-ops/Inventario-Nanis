@@ -378,10 +378,12 @@ function estiloDe(pr,altura){
 }
 async function loadCatalog(){
   $("#pInfo").textContent="Cargando catálogo…";
+  // Supabase entrega máximo 1000 filas por consulta: se piden en páginas
+  const todo=async mk=>{let out=[];for(let i=0;;i+=1000){const r=await mk().range(i,i+999);if(r.error)return r;out=out.concat(r.data);if(r.data.length<1000)return {data:out}}};
   const [p,c,s]=await Promise.all([
-    sb.from("productos").select("id,modelo,nombre,tipo,altura").eq("activo",true).limit(5000),
-    sb.from("producto_colores").select("producto_id,color,foto").limit(10000),
-    sb.from("producto_skus").select("producto_id,color,talla,altura,stock").limit(20000)]);
+    todo(()=>sb.from("productos").select("id,modelo,nombre,tipo,altura").eq("activo",true).order("id")),
+    todo(()=>sb.from("producto_colores").select("producto_id,color,foto").order("producto_id").order("color")),
+    todo(()=>sb.from("producto_skus").select("producto_id,color,talla,altura,stock").order("sku_id"))]);
   if(p.error||c.error||s.error){$("#pInfo").textContent="No se pudo cargar el catálogo.";return}
   const prod=new Map(p.data.map(x=>[x.id,x]));
   const items=[];

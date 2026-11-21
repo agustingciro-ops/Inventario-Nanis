@@ -9,6 +9,19 @@
     total = j.data.total_product_count; all = all.concat(j.data.products || []); page++;
     if (!(j.data.products || []).length) break;
   }
+  // Desde nov 2026 la lista de productos trae solo 1 SKU por producto: se piden todas las tallas/colores aparte
+  const SKUS = '/api/v1/product/local/product/skus/list?locale=en&language=en&aid=4068&app_name=i18n_ecom_shop&device_platform=web&tab_id=2&is_online_version=true&need_dt_warehouse=false&sku_fetch_condition=2&is_need_target_stock=true&product_id=';
+  const faltan = all.filter(p => (p.skus || []).length < (p.total_sku_count || 0));
+  let k = 0;
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    while (k < faltan.length) {
+      const p = faltan[k++];
+      const j = await (await fetch(SKUS + p.product_id + '&oec_seller_id=' + p.seller_id + '&seller_id=' + p.seller_id, { headers: { 'X-Tt-Oec-Region': 'US' } })).json();
+      if (j.code !== 0) throw new Error('TikTok respondió (SKUs de ' + p.product_id + '): ' + j.message);
+      const s = Array.isArray(j.data) ? j.data : (j.data?.skus || []);
+      if (s.length) p.skus = s;
+    }
+  }));
   const isShoe = p => (p.categories || []).some(c => /shoe|footwear|sandal|sneaker|flat|espadrille|heel|wedge|trainer/i.test(c.name));
   const tipoDe = p => (p.categories || []).some(c => /sneaker|trainer|walking/i.test(c.name)) ? 'Tenis' : 'Sandalia';
   const alturaDe = t => { const m = String(t).match(/(\d+(?:[.,]\d+)?)\s*cm/i); if (m) return m[1].replace(',', '.') + ' cm'; return /\bflats?\b/i.test(t) ? 'Flat' : ''; };
