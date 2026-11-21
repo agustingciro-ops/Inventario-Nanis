@@ -22,6 +22,8 @@
       if (s.length) p.skus = s;
     }
   }));
+  // Productos que no van en el buscador (ni fotos ni inventario)
+  const EXCLUIR = /mystery\s*box|surprise\s*combos?/i;
   const isShoe = p => (p.categories || []).some(c => /shoe|footwear|sandal|sneaker|flat|espadrille|heel|wedge|trainer/i.test(c.name));
   const tipoDe = p => (p.categories || []).some(c => /sneaker|trainer|walking/i.test(c.name)) ? 'Tenis' : 'Sandalia';
   const alturaDe = t => { const m = String(t).match(/(\d+(?:[.,]\d+)?)\s*cm/i); if (m) return m[1].replace(',', '.') + ' cm'; return /\bflats?\b/i.test(t) ? 'Flat' : ''; };
@@ -33,7 +35,7 @@
   };
   const out = [];
   for (const p of all) {
-    if (p.product_status_view?.product_main_status !== 1 || !isShoe(p)) continue;
+    if (p.product_status_view?.product_main_status !== 1 || !isShoe(p) || EXCLUIR.test(p.product_name)) continue;
     const props = p.sale_properties || [];
     const colorProp = props.find(x => /color/i.test(x.name));
     const seen = {};

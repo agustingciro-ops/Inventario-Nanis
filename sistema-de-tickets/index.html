@@ -385,7 +385,7 @@ async function loadCatalog(){
     todo(()=>sb.from("producto_colores").select("producto_id,color,foto").order("producto_id").order("color")),
     todo(()=>sb.from("producto_skus").select("producto_id,color,talla,altura,stock").order("sku_id"))]);
   if(p.error||c.error||s.error){$("#pInfo").textContent="No se pudo cargar el catálogo.";return}
-  const prod=new Map(p.data.map(x=>[x.id,x]));
+  const prod=new Map(p.data.filter(x=>!/mystery\s*box|surprise\s*combos?/i.test(x.nombre)).map(x=>[x.id,x]));
   const items=[];
   c.data.forEach(col=>{const pr=prod.get(col.producto_id);if(!pr)return;
     const vs=s.data.filter(v=>v.producto_id===col.producto_id&&v.color===col.color).map(v=>({...v,estilo:estiloDe(pr,v.altura)}));
